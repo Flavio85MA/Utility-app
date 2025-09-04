@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PDF & Image & Video Toolkit</title>
+  <link rel="stylesheet" href="style.css"/>
+
+  <!-- Librerie core PDF -->
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <!-- DOCX / WORD->PDF -->
+  <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <!-- Excel in browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Immagini: resize di qualità -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pica/9.0.1/pica.min.js"></script>
+
+  <!-- FFmpeg (necessario per i blocchi video) -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1>PDF · Immagini · Video Toolkit</h1>
+    <button id="open-settings" class="btn ghost" type="button">Impostazioni</button>
+  </header>
+
+  <nav class="tabs">
+    <button id="btn-pdf" class="tab active" type="button">Strumenti PDF</button>
+    <button id="btn-images" class="tab" type="button">Strumenti immagini</button>
+    <button id="btn-video" class="tab" type="button">Strumenti video</button>
+  </nav>
+
+  <main class="container">
+    <!-- ===================== SEZIONE PDF ===================== -->
+    <section id="section-pdf" class="section active">
+      <div class="card">
+        <h3>Strumenti PDF</h3>
+
+        <div class="grid two">
+          <!-- DIVIDI PDF -->
+          <div class="card soft">
+            <h4>Dividi PDF (estrai pagine selezionate)</h4>
+            <input type="file" id="split-file" accept="application/pdf">
+            <div class="row">
+              <button id="split-select-all" class="btn">Seleziona tutto</button>
+              <button id="split-clear-sel" class="btn warn">Pulisci selezione</button>
+              <span class="hint">Clicca sulle anteprime per selezionare/deselezionare.</span>
+            </div>
+            <div id="split-preview" class="thumbs"></div>
+            <button id="split-run" class="btn primary">Crea PDF con pagine selezionate</button>
+            <div class="status" id="split-status"></div>
+          </div>
+
+          <!-- ELIMINA PAGINE -->
+          <div class="card soft">
+            <h4>Eliminatore di pagine PDF (rimuovi selezionate)</h4>
+            <input type="file" id="delete-file" accept="application/pdf">
+            <div class="row">
+              <button id="delete-select-all" class="btn">Seleziona tutto</button>
+              <button id="delete-clear-sel" class="btn warn">Pulisci selezione</button>
+              <span class="hint">Clicca sulle anteprime per selezionare/deselezionare.</span>
+            </div>
+            <div id="delete-preview" class="thumbs"></div>
+            <button id="delete-run" class="btn primary">Crea PDF senza pagine selezionate</button>
+            <div class="status" id="delete-status"></div>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <!-- PDF → IMMAGINI -->
+          <div class="card soft">
+            <h4>PDF → Immagini</h4>
+            <input type="file" id="pdf-input" accept="application/pdf">
+            <label>Formato:
+              <select id="pdf2img-format">
+                <option value="png" selected>PNG</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+            </label>
+            <button id="pdf2img-run" class="btn">Converti</button>
+            <div id="pdf2img-status" class="status"></div>
+            <div id="pdf2img-preview" class="thumbs"></div>
+            <div class="row">
+              <button id="pdf2img-download-all" class="btn" disabled>Scarica tutte</button>
+              <button id="pdf2img-clear" class="btn warn">Pulisci</button>
+            </div>
+          </div>
+
+          <!-- IMMAGINI → PDF -->
+          <div class="card soft">
+            <h4>Immagini → PDF</h4>
+            <input type="file" id="img2pdf-input" accept="image/*" multiple>
+            <label>Orientamento:
+              <select id="pdf-orientation">
+                <option value="auto" selected>Auto</option>
+                <option value="p">Portrait</option>
+                <option value="l">Landscape</option>
+              </select>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="fit-page" checked> Adatta pagina
+            </label>
+            <button id="img2pdf-run" class="btn">Crea PDF</button>
+            <div id="img2pdf-status" class="status"></div>
+          </div>
+        </div>
+
+        <!-- CONVERSIONI PDF/Office (lite) -->
+        <div class="card soft">
+          <h4>Conversioni</h4>
+
+          <div class="row">
+            <input type="file" id="pdf-adv-file" accept="application/pdf">
+            <button id="pdf2word-run" class="btn">PDF in WORD (lite)</button>
+            <button id="pdf2word-dl" class="btn mini" disabled>Scarica</button>
+          </div>
+
+          <div class="row">
+            <button id="pdf2excel-run" class="btn">PDF in EXCEL (lite)</button>
+            <button id="pdf2excel-dl" class="btn mini" disabled>Scarica</button>
+            <button id="pdf2csv-run" class="btn">PDF in CSV (lite)</button>
+            <button id="pdf2csv-dl" class="btn mini" disabled>Scarica</button>
+          </div>
+
+          <div class="row">
+            <input type="file" id="word-file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            <button id="word2pdf-run" class="btn">da WORD a PDF</button>
+            <button id="word2pdf-dl" class="btn mini" disabled>Scarica</button>
+          </div>
+
+          <div class="row">
+            <input type="file" id="excel-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+            <button id="excel2pdf-run" class="btn">da EXCEL a PDF</button>
+            <button id="excel2pdf-dl" class="btn mini" disabled>Scarica</button>
+          </div>
+
+          <div class="status" id="advconv-status"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SEZIONE IMMAGINI ===================== -->
+    <section id="section-images" class="section">
+      <div class="card">
+        <h3>Strumenti Immagini</h3>
+
+        <div class="grid two">
+          <!-- Comprimi -->
+          <div class="card soft">
+            <h4>Comprimi immagine</h4>
+            <input type="file" id="cmp-file" accept="image/*">
+            <div class="row">
+              <label>Formato:
+                <select id="cmp-format">
+                  <option value="image/jpeg">JPEG</option>
+                  <option value="image/png">PNG</option>
+                  <option value="image/webp">WEBP</option>
+                </select>
+              </label>
+              <label>Qualità:
+                <input type="range" id="cmp-quality" min="0.1" max="1" step="0.05" value="0.8">
+              </label>
+            </div>
+            <button id="cmp-run" class="btn">Comprimi</button>
+            <button id="cmp-dl" class="btn mini" disabled>Scarica</button>
+            <div id="cmp-status" class="status"></div>
+            <div id="cmp-preview" class="thumbs"></div>
+          </div>
+
+          <!-- Ridimensiona -->
+          <div class="card soft">
+            <h4>Ridimensiona</h4>
+            <input type="file" id="rsz-file" accept="image/*">
+            <div class="row">
+              <label>Larghezza (px): <input type="number" id="rsz-w" min="1" value="1080"></label>
+              <label>Altezza (px): <input type="number" id="rsz-h" min="1" value="1080"></label>
+              <label class="checkbox"><input type="checkbox" id="rsz-keep" checked> Mantieni proporzioni</label>
+              <label>Formato:
+                <select id="rsz-format">
+                  <option value="image/jpeg">JPEG</option>
+                  <option value="image/png" selected>PNG</option>
+                  <option value="image/webp">WEBP</option>
+                </select>
+              </label>
+              <label>Qualità (se lossy):
+                <input type="range" id="rsz-quality" min="0.1" max="1" step="0.05" value="0.9">
+              </label>
+            </div>
+            <button id="rsz-run" class="btn">Ridimensiona</button>
+            <button id="rsz-dl" class="btn mini" disabled>Scarica</button>
+            <div id="rsz-status" class="status"></div>
+            <div id="rsz-preview" class="thumbs"></div>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <!-- Combina immagini -->
+          <div class="card soft">
+            <h4>Combina immagini</h4>
+
+            <div id="cmb-drop" class="dropzone">
+              <strong>Trascina qui più immagini</strong><br>
+              oppure
+              <label class="btn">Scegli file
+                <input type="file" id="cmb-files" accept="image/*" multiple>
+              </label>
+            </div>
+
+            <div class="row">
+              <label>Layout:
+                <select id="cmb-layout">
+                  <option value="horizontal">Orizzontale</option>
+                  <option value="vertical">Verticale</option>
+                </select>
+              </label>
+              <label>Spaziatura (px): <input type="number" id="cmb-gap" min="0" value="8"></label>
+              <label>Colore sfondo: <input type="color" id="cmb-bg" value="#ffffff"></label>
+            </div>
+
+            <div id="cmb-preview" class="thumbs"></div>
+
+            <button id="cmb-run" class="btn">Combina</button>
+            <button id="cmb-dl" class="btn mini" disabled>Scarica</button>
+            <div id="cmb-status" class="status"></div>
+            <div class="canvas-wrap"><canvas id="cmb-canvas"></canvas></div>
+          </div>
+
+          <!-- Creatore di collage -->
+          <div class="card soft">
+            <h4>Creatore di collage</h4>
+
+            <div id="clg-drop" class="dropzone">
+              <strong>Trascina qui le immagini</strong><br>
+              oppure
+              <label class="btn">Scegli file
+                <input type="file" id="clg-files" accept="image/*" multiple>
+              </label>
+            </div>
+
+            <div class="row">
+              <label>Righe: <input type="number" id="clg-rows" min="1" value="2"></label>
+              <label>Colonne: <input type="number" id="clg-cols" min="1" value="2"></label>
+              <label>Gap (px): <input type="number" id="clg-gap" min="0" value="8"></label>
+              <label>Canvas (px): <input type="number" id="clg-w" min="100" value="1080">×<input type="number" id="clg-h" min="100" value="1080"></label>
+              <label>Background: <input type="color" id="clg-bg" value="#ffffff"></label>
+              <label>Fit:
+                <select id="clg-fit">
+                  <option value="cover" selected>Cover (riempi)</option>
+                  <option value="contain">Contain (adatta)</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="clg-preview" class="thumbs"></div>
+
+            <button id="clg-run" class="btn">Crea Collage</button>
+            <button id="clg-dl" class="btn mini" disabled>Scarica</button>
+            <div id="clg-status" class="status"></div>
+            <div class="canvas-wrap"><canvas id="clg-canvas"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Conversioni formato (spazio dedicato orizzontale) -->
+        <div class="card soft">
+          <h4>Conversioni formato</h4>
+
+          <div class="tiles tall">
+            <!-- PNG → JPG -->
+            <div class="tile">
+              <h5>PNG → JPG</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli PNG
+                    <input type="file" accept="image/png" data-from="image/png" data-to="image/jpeg">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body"><img data-input-preview alt=""></div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-convert>Converti</button>
+                    <button class="btn mini" data-download disabled>Scarica</button>
+                  </div>
+                  <div class="status" data-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato</div>
+                    <div class="preview-body"><img data-output-preview alt=""></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- JPG → PNG -->
+            <div class="tile">
+              <h5>JPG → PNG</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli JPG/JPEG
+                    <input type="file" accept="image/jpeg" data-from="image/jpeg" data-to="image/png">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body"><img data-input-preview alt=""></div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-convert>Converti</button>
+                    <button class="btn mini" data-download disabled>Scarica</button>
+                  </div>
+                  <div class="status" data-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato</div>
+                    <div class="preview-body"><img data-output-preview alt=""></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- PNG → WEBP -->
+            <div class="tile">
+              <h5>PNG → WEBP</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli PNG
+                    <input type="file" accept="image/png" data-from="image/png" data-to="image/webp">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body"><img data-input-preview alt=""></div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-convert>Converti</button>
+                    <button class="btn mini" data-download disabled>Scarica</button>
+                  </div>
+                  <div class="status" data-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato</div>
+                    <div class="preview-body"><img data-output-preview alt=""></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- JPG → WEBP -->
+            <div class="tile">
+              <h5>JPG → WEBP</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli JPG/JPEG
+                    <input type="file" accept="image/jpeg" data-from="image/jpeg" data-to="image/webp">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body"><img data-input-preview alt=""></div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-convert>Converti</button>
+                    <button class="btn mini" data-download disabled>Scarica</button>
+                  </div>
+                  <div class="status" data-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato</div>
+                    <div class="preview-body"><img data-output-preview alt=""></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- WEBP → PNG -->
+            <div class="tile">
+              <h5>WEBP → PNG</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli WEBP
+                    <input type="file" accept="image/webp" data-from="image/webp" data-to="image/png">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body"><img data-input-preview alt=""></div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-convert>Converti</button>
+                    <button class="btn mini" data-download disabled>Scarica</button>
+                  </div>
+                  <div class="status" data-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato</div>
+                    <div class="preview-body"><img data-output-preview alt=""></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /tiles -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SEZIONE VIDEO ===================== -->
+    <section id="section-video" class="section">
+      <div class="card">
+        <h3>Strumenti Video</h3>
+
+        <div class="grid two">
+          <!-- COMPRIMI VIDEO -->
+          <div class="card soft">
+            <h4>Comprimi video</h4>
+            <input type="file" id="vid-comp-file" accept="video/*">
+            <div class="row">
+              <label>CRF:
+                <input type="number" id="vid-comp-crf" min="18" max="40" value="26" />
+              </label>
+              <label>Preset:
+                <select id="vid-comp-preset">
+                  <option>ultrafast</option>
+                  <option>superfast</option>
+                  <option>veryfast</option>
+                  <option>faster</option>
+                  <option selected>medium</option>
+                  <option>slow</option>
+                  <option>slower</option>
+                  <option>veryslow</option>
+                </select>
+              </label>
+              <label>Audio:
+                <select id="vid-comp-audio">
+                  <option value="aac" selected>Ricodifica AAC</option>
+                  <option value="copy">Copia audio</option>
+                  <option value="opus">WEBM (Opus)</option>
+                </select>
+              </label>
+            </div>
+            <div class="progress" id="vid-comp-progress"><div></div></div>
+            <div class="row">
+              <button id="vid-comp-run" class="btn">Comprimi</button>
+              <button id="vid-comp-dl" class="btn mini" disabled>Scarica</button>
+            </div>
+            <div id="vid-comp-status" class="status"></div>
+          </div>
+
+          <!-- RIDIMENSIONA VIDEO -->
+          <div class="card soft">
+            <h4>Ridimensiona video</h4>
+            <input type="file" id="vid-resize-file" accept="video/*">
+            <div class="row">
+              <label>Larghezza (px):
+                <input type="number" id="vid-resize-w" min="160" value="1280" />
+              </label>
+              <label>CRF:
+                <input type="number" id="vid-resize-crf" min="18" max="40" value="26" />
+              </label>
+              <label>Preset:
+                <select id="vid-resize-preset">
+                  <option>ultrafast</option>
+                  <option>superfast</option>
+                  <option>veryfast</option>
+                  <option>faster</option>
+                  <option selected>medium</option>
+                  <option>slow</option>
+                  <option>slower</option>
+                  <option>veryslow</option>
+                </select>
+              </label>
+            </div>
+            <div class="progress" id="vid-resize-progress"><div></div></div>
+            <div class="row">
+              <button id="vid-resize-run" class="btn">Ridimensiona</button>
+              <button id="vid-resize-dl" class="btn mini" disabled>Scarica</button>
+            </div>
+            <div id="vid-resize-status" class="status"></div>
+          </div>
+        </div>
+
+        <!-- CONVERSIONI FORMATO VIDEO (spazio dedicato orizzontale) -->
+        <div class="card soft">
+          <h4>Conversioni formato video</h4>
+
+          <div class="tiles tall">
+            <!-- MP4 → MP3 -->
+            <div class="tile">
+              <h5>MP4 → MP3</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli MP4
+                    <input type="file" accept="video/mp4" data-vconv-from="mp4" data-vconv-to="mp3">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (audio)</div>
+                    <div class="preview-body media-preview">
+                      <audio data-vout-audio controls></audio>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- MOV → MP4 -->
+            <div class="tile">
+              <h5>MOV → MP4</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli MOV
+                    <input type="file" accept="video/quicktime,video/mov" data-vconv-from="mov" data-vconv-to="mp4">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (video)</div>
+                    <div class="preview-body media-preview">
+                      <video data-vout-video controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- WEBM → MP4 -->
+            <div class="tile">
+              <h5>WEBM → MP4</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli WEBM
+                    <input type="file" accept="video/webm" data-vconv-from="webm" data-vconv-to="mp4">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (video)</div>
+                    <div class="preview-body media-preview">
+                      <video data-vout-video controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- MP4 → MOV -->
+            <div class="tile">
+              <h5>MP4 → MOV</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli MP4
+                    <input type="file" accept="video/mp4" data-vconv-from="mp4" data-vconv-to="mov">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (video)</div>
+                    <div class="preview-body media-preview">
+                      <video data-vout-video controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- MP4 → WEBM -->
+            <div class="tile">
+              <h5>MP4 → WEBM</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli MP4
+                    <input type="file" accept="video/mp4" data-vconv-from="mp4" data-vconv-to="webm">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (video)</div>
+                    <div class="preview-body media-preview">
+                      <video data-vout-video controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- MOV → MP3 -->
+            <div class="tile">
+              <h5>MOV → MP3</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli MOV
+                    <input type="file" accept="video/quicktime,video/mov" data-vconv-from="mov" data-vconv-to="mp3">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (audio)</div>
+                    <div class="preview-body media-preview">
+                      <audio data-vout-audio controls></audio>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Comprimi MOV → MP4 -->
+            <div class="tile">
+              <h5>Comprimi MOV → MP4</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli MOV
+                    <input type="file" accept="video/quicktime,video/mov" data-vconv-from="mov" data-vconv-to="mp4" data-vconv-mode="compress">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Comprimi</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (video)</div>
+                    <div class="preview-body media-preview">
+                      <video data-vout-video controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- WEBM → MP3 -->
+            <div class="tile">
+              <h5>WEBM → MP3</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli WEBM
+                    <input type="file" accept="video/webm" data-vconv-from="webm" data-vconv-to="mp3">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (audio)</div>
+                    <div class="preview-body media-preview">
+                      <audio data-vout-audio controls></audio>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- WEBM → MOV -->
+            <div class="tile">
+              <h5>WEBM → MOV</h5>
+              <div class="tile-grid two">
+                <div class="pane">
+                  <label class="btn">Scegli WEBM
+                    <input type="file" accept="video/webm" data-vconv-from="webm" data-vconv-to="mov">
+                  </label>
+                  <div class="preview-box">
+                    <div class="preview-title">Anteprima originale</div>
+                    <div class="preview-body media-preview">
+                      <video data-vin-preview controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+                <div class="pane">
+                  <div class="row">
+                    <button class="btn" data-vconv-run>Converti</button>
+                    <button class="btn mini" data-vconv-dl disabled>Scarica</button>
+                  </div>
+                  <div class="progress" data-vconv-progress><div></div></div>
+                  <div class="status" data-vconv-status></div>
+                  <div class="preview-box">
+                    <div class="preview-title">Risultato (video)</div>
+                    <div class="preview-body media-preview">
+                      <video data-vout-video controls preload="metadata"></video>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /tiles -->
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="settings-modal">
+    <form method="dialog" class="settings-form">
+      <h2>Impostazioni</h2>
+      <p>(Opzionale) In futuro qui potrai inserire chiavi API per funzioni avanzate.</p>
+      <menu>
+        <button id="save-settings" value="save" class="btn" type="button">Salva</button>
+        <button id="close-settings" value="cancel" class="btn ghost" type="button">Chiudi</button>
+        <button id="clear-settings" class="btn warn" type="button">Pulisci tutto</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <footer class="app-footer">
+    <small>Operazioni core offline. Le conversioni “lite” dei PDF sono euristiche e adatte a documenti semplici.</small>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
