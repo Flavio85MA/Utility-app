@@ -880,40 +880,72 @@ document.addEventListener('DOMContentLoaded', () => {
   // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
   let ffmpeg = null, ffLoaded = false;
   async function getFF(updateCb, statusEl){
-    if (!FFClass) {
-      const msg = 'FFmpeg UMD non trovato: verifica che gli <script> @ffmpeg/ffmpeg e @ffmpeg/util siano PRIMA di script.js.';
-      statusEl && (statusEl.textContent = msg);
-      throw new Error(msg);
-    }
-    if (ffmpeg && ffLoaded) {
-      try { ffmpeg.off?.('progress'); } catch {}
-      ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
-      return ffmpeg;
-    }
+  if (!FFClass) {
+    const msg = 'FFmpeg UMD non trovato: controlla che gli <script> @ffmpeg/ffmpeg e @ffmpeg/util siano PRIMA di script.js.';
+    statusEl && (statusEl.textContent = msg);
+    throw new Error(msg);
+  }
 
-    ffmpeg = new FFClass();
-    ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
+  // Riusa istanza già caricata
+  if (ffmpeg && ffLoaded) {
+    try { ffmpeg.off?.('progress'); } catch {}
     ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
-
-    const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
-    statusEl && (statusEl.textContent = 'Carico ffmpeg-core (~31MB)...');
-    const coreURL = await toBlobURLFF(`${base}/ffmpeg-core.js`, 'text/javascript');
-    const wasmURL = await toBlobURLFF(`${base}/ffmpeg-core.wasm`, 'application/wasm');
-
-    await ffmpeg.load({ coreURL, wasmURL });
-    ffLoaded = true;
     return ffmpeg;
   }
 
-  // Esegue args con fallback (prova più varianti finché una passa)
-  async function execWithFallback(ff, variants){
-    let lastErr=null;
-    for(const v of variants){
-      try{ await ff.exec(v.args); return v; }
-      catch(e){ lastErr = e; console.warn('[ffmpeg] variante fallita', v.args, e); }
+  ffmpeg = new FFClass();
+  ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
+  ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
+
+  const CORE_BASES = [
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
+    'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd'
+  ];
+  const FFMPEG_UMD_BASES = [
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd',
+    'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd'
+  ];
+
+  let lastErr = null;
+
+  // Proviamo varie combinazioni di CDN; in OGNI caso facciamo il worker 814 come blob (same-origin)
+  for (const coreBase of CORE_BASES) {
+    for (const umdBase of FFMPEG_UMD_BASES) {
+      try {
+        statusEl && (statusEl.textContent = `Carico core da ${new URL(coreBase).host}...`);
+        const classWorkerURL = await toBlobURLFF(`${umdBase}/814.ffmpeg.js`, 'text/javascript');
+
+        // 1) tentativo "diretto" per core/wasm + worker 814 come blob same-origin
+        await ffmpeg.load({
+          coreURL: `${coreBase}/ffmpeg-core.js`,
+          wasmURL: `${coreBase}/ffmpeg-core.wasm`,
+          classWorkerURL
+        });
+        ffLoaded = true;
+        return ffmpeg;
+      } catch (e1) {
+        console.warn('[ffmpeg] direct load fallito su', coreBase, e1);
+        lastErr = e1;
+        try {
+          statusEl && (statusEl.textContent = `Retry (blobURL) da ${new URL(coreBase).host}...`);
+          const coreURL  = await toBlobURLFF(`${coreBase}/ffmpeg-core.js`,   'text/javascript');
+          const wasmURL  = await toBlobURLFF(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm');
+          const classWorkerURL = await toBlobURLFF(`${umdBase}/814.ffmpeg.js`, 'text/javascript');
+          await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+          ffLoaded = true;
+          return ffmpeg;
+        } catch (e2) {
+          console.warn('[ffmpeg] blobURL load fallito su', coreBase, e2);
+          lastErr = e2;
+        }
+      }
     }
-    throw lastErr || new Error('Tutte le varianti sono fallite');
   }
+
+  const msg = 'Impossibile caricare ffmpeg-core/worker (rete/CSP?).';
+  statusEl && (statusEl.textContent = `${msg} Dettagli in console.`);
+  throw new Error(msg + (lastErr ? ` — ${lastErr.message||lastErr}` : ''));
+}
 
   // ====== COMPRIMI ======
   (function(){
@@ -1142,3 +1174,4 @@ document.addEventListener('DOMContentLoaded', () => {
   })();
 
 }); // DOMContentLoaded
+
