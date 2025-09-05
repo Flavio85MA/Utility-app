@@ -1,39 +1,44 @@
 // script.js — PDF · Immagini · Video (ffmpeg.wasm)
-// Richiede nel <head>:
+// Richiede nel <head> di index.html:
 // <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
 // <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 
 document.addEventListener('DOMContentLoaded', () => {
   // =======================
   // NAV A TAB (bulletproof)
-// =======================
-const ids = ['pdf','images','video'];
+  // =======================
+  const ids = ['pdf','images','video'];
 
-function setActiveTab(which){
-  ids.forEach(name => {
-    const btn = document.getElementById(`btn-${name}`);
-    const sec = document.getElementById(`section-${name}`);
-    if (btn) btn.classList.toggle('active', name === which);
-    if (sec) sec.classList.toggle('active', name === which);
+  function setActiveTab(which){
+    ids.forEach(name => {
+      const btn = document.getElementById(`btn-${name}`);
+      const sec = document.getElementById(`section-${name}`);
+      if (btn) btn.classList.toggle('active', name === which);
+      if (sec) sec.classList.toggle('active', name === which);
+    });
+    // sincronizza hash (utile per GitHub Pages)
+    if (ids.includes(which)) {
+      history.replaceState(null, '', `#${which}`);
+    }
+  }
+
+  // inizializza (da hash se presente, altrimenti pdf)
+  const fromHash = (location.hash || '').replace('#','');
+  setActiveTab(ids.includes(fromHash) ? fromHash : 'pdf');
+
+  // listener diretti
+  document.getElementById('btn-pdf')?.addEventListener('click', () => setActiveTab('pdf'));
+  document.getElementById('btn-images')?.addEventListener('click', () => setActiveTab('images'));
+  document.getElementById('btn-video')?.addEventListener('click', () => setActiveTab('video'));
+
+  // accessibilità tastiera
+  ['btn-pdf','btn-images','btn-video'].forEach(id=>{
+    const el = document.getElementById(id);
+    el?.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
+    });
   });
-}
 
-// inizializza (se c'è hash usa quello, altrimenti pdf)
-const fromHash = (location.hash || '').replace('#','');
-setActiveTab(ids.includes(fromHash) ? fromHash : 'pdf');
-
-// listener diretti (no delega)
-document.getElementById('btn-pdf')?.addEventListener('click', () => setActiveTab('pdf'));
-document.getElementById('btn-images')?.addEventListener('click', () => setActiveTab('images'));
-document.getElementById('btn-video')?.addEventListener('click', () => setActiveTab('video'));
-
-// accessibilità tastiera
-['btn-pdf','btn-images','btn-video'].forEach(id=>{
-  const el = document.getElementById(id);
-  el?.addEventListener('keydown', (e)=>{
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
-  });
-});
   // =======================
   // MODALE IMPOSTAZIONI
   // =======================
@@ -44,7 +49,7 @@ document.getElementById('btn-video')?.addEventListener('click', () => setActiveT
   document.getElementById('clear-settings')?.addEventListener('click', () => localStorage.clear());
 
   // =======================
-  // LIBS & HELPERS
+  // LIBS & HELPERS GENERALI
   // =======================
   const { jsPDF } = window.jspdf || {};
   const pdfjsLib = window['pdfjs-dist/build/pdf'];
@@ -835,21 +840,21 @@ document.getElementById('btn-video')?.addEventListener('click', () => setActiveT
   })();
 
   // =======================
-  // SEZIONE VIDEO (diagnostica + fallback CDN)
-// =======================
-try {
+  // SEZIONE VIDEO (ffmpeg.wasm)
+  // =======================
+
   // Avvisi utili
   if (location.protocol === 'file:') {
-    console.warn('[ffmpeg] Stai aprendo la pagina via file:// — usa un piccolo server locale (es. VSCode Live Server) per maggiore compatibilità.');
+    console.warn('[ffmpeg] Stai aprendo la pagina via file:// — usa un piccolo server locale (es. VSCode Live Server o python -m http.server) per evitare problemi di CORS con il core WASM.');
   }
 
-  // Individua la classe FFmpeg nelle UMD
+  // Individua namespace UMD (diversi bundle espongono nomi diversi)
   const FFClass =
+    (window.FFmpegWASM && window.FFmpegWASM.FFmpeg) ||
     (window.FFmpeg && window.FFmpeg.FFmpeg) ||
-    window.FFmpeg ||
-    (window.FFmpegWASM && window.FFmpegWASM.FFmpeg);
+    window.FFmpeg;
 
-  // Fallback util (se @ffmpeg/util UMD non c’è)
+  // Util dalla UMD @ffmpeg/util (se presente); altrimenti fallback compatibili
   const UtilNS = window.FFmpegUtil || {};
   const fetchFileFF = UtilNS.fetchFile || (async (src) => {
     if (src instanceof Blob) return new Uint8Array(await src.arrayBuffer());
@@ -864,24 +869,19 @@ try {
     return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
   });
 
-  // Progress bar helper
+  // progress bar helper e Blob utility
   function makeProgressUpdater(container){
     if(!container) return ()=>{};
     const bar = container.querySelector('div') || container.appendChild(document.createElement('div'));
     return (ratio)=>{ bar.style.width = `${Math.min(100, Math.round((ratio||0)*100))}%`; };
   }
-  const u8ToBlob = (u8, mime) => new Blob([u8.buffer], { type: mime || 'application/octet-stream' });
+  const u8ToBlob = (u8, mime) => new Blob([u8], { type: mime || 'application/octet-stream' });
 
-  // Loader FFmpeg con diagnostica + più CDN
-  let ffmpeg = null, ffLoaded = false, lastLoadErr = null;
-  const CDN_BASES = [
-    'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
-    'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd'
-  ];
-
+  // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
+  let ffmpeg = null, ffLoaded = false;
   async function getFF(updateCb, statusEl){
     if (!FFClass) {
-      const msg = 'FFmpeg UMD non trovato: controlla che gli <script> @ffmpeg/ffmpeg e @ffmpeg/util siano PRIMA di script.js.';
+      const msg = 'FFmpeg UMD non trovato: verifica che gli <script> @ffmpeg/ffmpeg e @ffmpeg/util siano PRIMA di script.js.';
       statusEl && (statusEl.textContent = msg);
       throw new Error(msg);
     }
@@ -895,38 +895,17 @@ try {
     ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
     ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
 
-    for (const base of CDN_BASES) {
-      try {
-        statusEl && (statusEl.textContent = `Carico core da ${new URL(base).host}...`);
-        // 1) Diretto
-        await ffmpeg.load({
-          coreURL: `${base}/ffmpeg-core.js`,
-          wasmURL: `${base}/ffmpeg-core.wasm`,
-        });
-        ffLoaded = true;
-        return ffmpeg;
-      } catch (e1) {
-        console.warn('[ffmpeg] direct load fallito su', base, e1);
-        lastLoadErr = e1;
-        // 2) Fallback blob URL
-        try {
-          statusEl && (statusEl.textContent = `Retry (blobURL) da ${new URL(base).host}...`);
-          const coreURL = await toBlobURLFF(`${base}/ffmpeg-core.js`, 'text/javascript');
-          const wasmURL = await toBlobURLFF(`${base}/ffmpeg-core.wasm`, 'application/wasm');
-          await ffmpeg.load({ coreURL, wasmURL });
-          ffLoaded = true;
-          return ffmpeg;
-        } catch (e2) {
-          console.warn('[ffmpeg] blobURL load fallito su', base, e2);
-          lastLoadErr = e2;
-        }
-      }
-    }
-    const msg = 'Impossibile caricare ffmpeg-core da tutti i CDN (rete/CSP?).';
-    statusEl && (statusEl.textContent = `${msg} Dettagli console.`);
-    throw new Error(msg + (lastLoadErr ? ` — ${lastLoadErr.message||lastLoadErr}` : ''));
+    const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
+    statusEl && (statusEl.textContent = 'Carico ffmpeg-core (~31MB)...');
+    const coreURL = await toBlobURLFF(`${base}/ffmpeg-core.js`, 'text/javascript');
+    const wasmURL = await toBlobURLFF(`${base}/ffmpeg-core.wasm`, 'application/wasm');
+
+    await ffmpeg.load({ coreURL, wasmURL });
+    ffLoaded = true;
+    return ffmpeg;
   }
 
+  // Esegue args con fallback (prova più varianti finché una passa)
   async function execWithFallback(ff, variants){
     let lastErr=null;
     for(const v of variants){
@@ -958,31 +937,29 @@ try {
 
         const extIn = (f.name.split('.').pop()||'mp4').toLowerCase();
         const inputName = `in.${extIn}`;
-        status.textContent="Scrivo input in FS...";
         await ff.writeFile(inputName, await fetchFileFF(f));
 
         const wantWebM = (audioEl?.value === 'opus');
         const outFS = wantWebM ? 'out.webm' : 'out.mp4';
         outName = f.name.replace(/\.[^.]+$/, wantWebM ? '.webm' : '.mp4');
 
-        const crf = Math.max(18, Math.min(40, parseInt(crfEl?.value||'26',10)));
-        const targetKbps = Math.max(400, 5200 - (crf * 120));
+        const crf    = Math.max(18, Math.min(40, parseInt(crfEl?.value||'26',10)));
+        const preset = (presetEl?.value||'medium');
 
-        status.textContent="Eseguo compressione...";
+        status.textContent="Comprimo...";
         const variants = wantWebM
           ? [
-              { args: ['-i', inputName, '-b:v', `${targetKbps}k`, '-c:v','libvpx-vp9','-row-mt','1', '-c:a','libopus','-b:a','128k', outFS] },
-{ args: ['-i', inputName, '-b:v', `${targetKbps}k`, '-c:v','libvpx',        '-c:a','libvorbis','-b:a','128k', outFS] },
-              { args: ['-i', inputName, '-b:v', `${targetKbps}k`, outFS] },
+              { args: ['-i', inputName, '-c:v','libvpx-vp9','-b:v','0','-crf', String(crf), '-row-mt','1', '-c:a','libopus','-b:a','128k', outFS] },
+              { args: ['-i', inputName, '-c:v','libvpx',      '-q:v','6',                  '-c:a','libvorbis','-b:a','128k', outFS] },
+              { args: ['-i', inputName, outFS] },
             ]
           : [
-              { args: ['-i', inputName, '-c:v','libx264','-crf', String(crf), '-preset', (presetEl?.value||'medium'),
-                       '-c:a','aac','-b:a','128k', '-movflags','+faststart', outFS] },
-              { args: ['-i', inputName, '-c:v','mpeg4','-q:v','5','-b:a','128k', outFS] },
-              { args: ['-i', inputName, '-b:v', `${targetKbps}k`, outFS] },
+              { args: ['-i', inputName, '-c:v','libx264','-crf', String(crf), '-preset', preset, '-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
+              { args: ['-i', inputName, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
+              { args: ['-i', inputName, outFS] },
             ];
-        await execWithFallback(ff, variants);
 
+        await execWithFallback(ff, variants);
         status.textContent="Leggo output...";
         const data = await ff.readFile(outFS);
         outBlob = u8ToBlob(data, wantWebM? 'video/webm' : 'video/mp4');
@@ -1016,25 +993,23 @@ try {
         const f = inEl.files?.[0]; if(!f){ status.textContent="Seleziona un video."; return; }
         const width = Math.max(160, parseInt(wEl?.value||'1280',10));
         const crf = Math.max(18, Math.min(40, parseInt(crfEl?.value||'26',10)));
-        const targetKbps = Math.max(400, 5200 - (crf * 120));
-
         const update = makeProgressUpdater(progress);
+
         status.textContent="Inizializzo FFmpeg...";
         const ff = await getFF(update, status);
 
         const extIn = (f.name.split('.').pop()||'mp4').toLowerCase();
         const inFS = `in.${extIn}`;
-        status.textContent="Scrivo input in FS...";
         await ff.writeFile(inFS, await fetchFileFF(f));
         const outFS = 'out.mp4';
         outName = f.name.replace(/\.[^.]+$/, '.mp4');
 
-        status.textContent="Eseguo ridimensionamento...";
+        status.textContent="Ridimensiono...";
         const variants = [
           { args: ['-i', inFS, '-vf', `scale=${width}:-2`, '-c:v','libx264','-crf', String(crf), '-preset', (presetEl?.value||'medium'),
                    '-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, '-c:v','mpeg4','-q:v','5','-b:a','128k', outFS] },
-          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, '-b:v', `${targetKbps}k`, outFS] },
+          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
+          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, outFS] },
         ];
         await execWithFallback(ff, variants);
 
@@ -1046,14 +1021,14 @@ try {
         update(1);
       }catch(e){
         console.error(e);
-        status.textContent = `Errore: ${e?.message || e}. Apri la console per i dettagli.`;
+        status.textContent = `Errore: ${e?.message || e}. Vedi console.`;
       }
     });
 
     dlEl.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, outName); });
   })();
 
-  // ====== CONVERSIONI ======
+  // ====== CONVERSIONI (MP4/MOV/WEBM/MP3) ======
   (function(){
     document.querySelectorAll('#section-video .tile').forEach(tile=>{
       const input = tile.querySelector('input[type="file"][data-vconv-from]');
@@ -1092,7 +1067,6 @@ try {
 
           const extIn = (f.name.split('.').pop()||'mp4').toLowerCase();
           const inFS = `in.${extIn}`;
-          status && (status.textContent="Scrivo input in FS...");
           await ff.writeFile(inFS, await fetchFileFF(f));
 
           let outFS = `out.${to}`;
@@ -1101,22 +1075,38 @@ try {
                    : (to==='webm')? 'video/webm'
                    : (to==='mp3') ? 'audio/mpeg'
                    : 'application/octet-stream';
-          let variants = [];
+          let variants = [], displayAsAudio = false;
 
           if (to === 'mp3') {
-            outFS = 'out.mp3'; outName = f.name.replace(/\.[^.]+$/, '.mp3');
+            outFS = 'out.mp3'; outName = f.name.replace(/\.[^.]+$/, '.mp3'); displayAsAudio = true;
             variants = [
               { args: ['-i', inFS, '-vn', '-c:a','libmp3lame','-b:a','192k', outFS] },
-              { args: ['-i', inFS, '-vn', '-c:a','aac',        '-b:a','192k', 'out.m4a'] },
+              { args: ['-i', inFS, '-vn', '-c:a','aac','-b:a','192k', 'out.m4a'] }, // fallback
             ];
-          } else {
-            outName = `converted.${to}`;
+          } else if (to === 'webm') {
+            outName = f.name.replace(/\.[^.]+$/, '.webm');
             variants = [
-              { args: ['-i', inFS, outFS] }
+              { args: ['-i', inFS, '-c:v','libvpx-vp9','-b:v','0','-crf','28','-row-mt','1', '-c:a','libopus','-b:a','128k', outFS] },
+              { args: ['-i', inFS, '-c:v','libvpx',      '-q:v','6',                 '-c:a','libvorbis','-b:a','128k', outFS] },
+              { args: ['-i', inFS, outFS] },
+            ];
+          } else if (to === 'mov') {
+            outName = f.name.replace(/\.[^.]+$/, '.mov');
+            variants = [
+              { args: ['-i', inFS, '-c:v','libx264','-crf','23','-preset','medium','-c:a','aac','-b:a','128k', outFS] },
+              { args: ['-i', inFS, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k', outFS] },
+              { args: ['-i', inFS, outFS] },
+            ];
+          } else { // mp4 (default)
+            outName = f.name.replace(/\.[^.]+$/, '.mp4');
+            variants = [
+              { args: ['-i', inFS, '-c:v','libx264','-crf','23','-preset','medium','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
+              { args: ['-i', inFS, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
+              { args: ['-i', inFS, outFS] },
             ];
           }
 
-          status && (status.textContent="Eseguo conversione...");
+          status && (status.textContent="Converto...");
           let used=null;
           try{ used = await execWithFallback(ff, variants); }
           catch(e){ status && (status.textContent = `Conversione fallita: ${e?.message||e}`); console.error(e); return; }
@@ -1124,12 +1114,13 @@ try {
           const lastOut = used?.args?.slice(-1)[0] || outFS;
           status && (status.textContent="Leggo output...");
           const data = await ff.readFile(lastOut);
-          outBlob = new Blob([data.buffer], { type: (lastOut==='out.m4a') ? 'audio/mp4' : mime });
+          const outType = (lastOut==='out.m4a') ? 'audio/mp4' : mime;
+          outBlob = new Blob([data], { type: outType });
 
           if(outURL){ URL.revokeObjectURL(outURL); outURL=null; }
           outURL = URL.createObjectURL(outBlob);
 
-          if(to==='mp3' || lastOut==='out.m4a'){
+          if(displayAsAudio || lastOut==='out.m4a'){
             if(aOut){ aOut.src = outURL; aOut.load(); }
             if(vOut){ vOut.removeAttribute('src'); }
           } else {
@@ -1149,7 +1140,5 @@ try {
       btnDl?.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, outName); });
     });
   })();
-} catch (e) {
-  console.error('VIDEO SECTION INIT ERROR:', e);
-}
-});
+
+}); // DOMContentLoaded
