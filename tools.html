@@ -3,167 +3,97 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Utility-app · Video & Strumenti Immagini</title>
-  <!-- Tailwind CSS (CDN) -->
+  <title>Utility-app · Strumenti Video (Sottotitoli)</title>
+
+  <!-- Tailwind CSS (CDN) per uno stile pulito -->
   <script src="https://cdn.tailwindcss.com"></script>
+
   <!-- FFmpeg.wasm (CDN) -->
-  <!-- Usiamo la versione con createFFmpeg via CDN: non serve nessun .wasm nel repo -->
+  <!-- Usiamo createFFmpeg + corePath da unpkg: nessun file .wasm nel repo -->
   <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800">
-  <header class="max-w-5xl mx-auto px-4 pt-8 pb-4">
-    <h1 class="text-3xl font-bold">Utility-app</h1>
-    <p class="text-sm text-slate-500">Video: masterizza sottotitoli · Immagini: comprimi, ridimensiona, converti, collage</p>
-  </header>
+  <main class="max-w-3xl mx-auto px-4 py-8">
+    <h1 class="text-2xl font-bold mb-1">Strumenti Video — Masterizza Sottotitoli</h1>
+    <p class="text-sm text-slate-600 mb-6">
+      Carica un <b>video</b> e un file sottotitoli (<code>.srt</code> o <code>.ass</code>).<br/>
+      Se hai un <code>.srt</code>, puoi <b>generare un .ass colorato</b> (testo giallo/bianco, contorno, ecc.) e poi masterizzarlo nel video.
+      Tutto avviene <i>nel browser</i> (ffmpeg.wasm).
+    </p>
 
-  <main class="max-w-5xl mx-auto px-4 pb-24">
-    <!-- Tabs -->
-    <div class="flex gap-2 mb-6">
-      <button id="tabVideo" class="px-4 py-2 rounded-2xl bg-white shadow hover:shadow-md">Video</button>
-      <button id="tabImages" class="px-4 py-2 rounded-2xl bg-white shadow hover:shadow-md">Strumenti Immagini</button>
+    <!-- Selettori file -->
+    <div class="grid sm:grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="text-sm font-medium">Video</label>
+        <input id="videoFile" type="file" accept="video/*"
+               class="mt-1 block w-full file:px-3 file:py-2 file:rounded-xl file:border-0 file:bg-slate-800 file:text-white file:text-sm file:cursor-pointer"/>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Sottotitoli (.srt o .ass)</label>
+        <input id="subsFile" type="file" accept=".srt,.ass"
+               class="mt-1 block w-full file:px-3 file:py-2 file:rounded-xl file:border-0 file:bg-slate-800 file:text-white file:text-sm file:cursor-pointer"/>
+      </div>
     </div>
 
-    <!-- VIDEO CARD -->
-    <section id="videoPanel" class="bg-white rounded-2xl shadow p-5 grid gap-4">
-      <h2 class="text-xl font-semibold">Masterizza sottotitoli nel video (client-side, senza server)</h2>
-      <p class="text-sm text-slate-600">
-        Carica un <b>video</b> e un file sottotitoli (<code>.srt</code> o <code>.ass</code>). Per sottotitoli
-        <i>colorati</i> usa <code>.ass</code> (stile integrato) oppure genera un <code>.ass</code> base dal tuo
-        <code>.srt</code> qui sotto.
-      </p>
-
-      <div class="grid md:grid-cols-2 gap-4">
-        <div class="grid gap-2">
-          <label class="text-sm font-medium">Video</label>
-          <input id="videoFile" type="file" accept="video/*" class="file:mr-3 file:px-3 file:py-2 file:rounded-xl file:border-0 file:bg-slate-800 file:text-white file:text-sm file:cursor-pointer"/>
-        </div>
-        <div class="grid gap-2">
-          <label class="text-sm font-medium">Sottotitoli (.srt o .ass)</label>
-          <input id="subsFile" type="file" accept=".srt,.ass" class="file:mr-3 file:px-3 file:py-2 file:rounded-xl file:border-0 file:bg-slate-800 file:text-white file:text-sm file:cursor-pointer"/>
-        </div>
+    <!-- Generatore .ASS da .SRT -->
+    <div class="bg-white rounded-xl shadow p-4 mb-4 grid sm:grid-cols-3 gap-4">
+      <div>
+        <label class="text-sm font-medium">Colore testo</label>
+        <input id="assColor" type="color" value="#ffd400" class="mt-1 h-10 w-20 rounded"/>
+        <p class="text-xs text-slate-500 mt-1">Consigliato: giallo (#ffd400) o bianco (#ffffff)</p>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Dimensione font</label>
+        <input id="assFontSize" type="number" value="28" min="10" max="96"
+               class="mt-1 w-full border rounded px-3 py-2"/>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Contorno (stroke)</label>
+        <input id="assOutline" type="number" value="2" min="0" max="8"
+               class="mt-1 w-full border rounded px-3 py-2"/>
       </div>
 
-      <div class="grid md:grid-cols-3 gap-4 bg-slate-50 rounded-xl p-4">
-        <div class="grid gap-2">
-          <label class="text-sm font-medium">Colore testo (per .ass generato)</label>
-          <input id="assColor" type="color" value="#ffd400" class="h-10 w-20 rounded"/>
-          <p class="text-xs text-slate-500">Suggerimento: giallo (#ffd400) o bianco (#ffffff)</p>
-        </div>
-        <div class="grid gap-2">
-          <label class="text-sm font-medium">Dimensione font</label>
-          <input id="assFontSize" type="number" value="28" min="10" max="96" class="border rounded px-3 py-2"/>
-        </div>
-        <div class="grid gap-2">
-          <label class="text-sm font-medium">Contorno (stroke)</label>
-          <input id="assOutline" type="number" value="2" min="0" max="8" class="border rounded px-3 py-2"/>
-        </div>
-        <div class="md:col-span-3">
-          <button id="btnMakeAss" class="mt-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm hover:opacity-90">Se hai un .srt, genera qui un .ass colorato</button>
-          <span id="assMakeMsg" class="ml-3 text-xs text-slate-500"></span>
-        </div>
+      <div class="sm:col-span-3">
+        <button id="btnMakeAss"
+                class="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm hover:opacity-90">
+          Se hai un .srt, genera qui un .ass colorato
+        </button>
+        <span id="assMakeMsg" class="ml-3 text-xs text-slate-500"></span>
       </div>
+    </div>
 
-      <div class="flex items-center gap-3">
-        <button id="btnBurn" class="px-5 py-2 rounded-2xl bg-emerald-600 text-white font-medium hover:opacity-90">Masterizza sottotitoli nel video</button>
-        <span id="videoStatus" class="text-sm text-slate-500"></span>
-      </div>
+    <!-- Azione principale -->
+    <div class="flex items-center gap-3 mb-4">
+      <button id="btnBurn"
+              class="px-5 py-2 rounded-2xl bg-emerald-600 text-white font-medium hover:opacity-90">
+        Masterizza sottotitoli nel video
+      </button>
+      <span id="videoStatus" class="text-sm text-slate-500"></span>
+    </div>
 
-      <video id="outVideo" controls class="w-full rounded-xl border hidden"></video>
-      <a id="outDownload" download="video_sottotitoli.mp4" class="hidden underline text-sm">Scarica il video</a>
-    </section>
+    <!-- Output -->
+    <video id="outVideo" controls class="w-full rounded-xl border hidden mb-2"></video>
+    <a id="outDownload" download="video_sottotitoli.mp4" class="hidden underline text-sm">Scarica il video</a>
 
-    <!-- IMAGES CARD -->
-    <section id="imagesPanel" class="bg-white rounded-2xl shadow p-5 grid gap-4 hidden">
-      <h2 class="text-xl font-semibold">Strumenti Immagini (solo browser, senza API)</h2>
-      <p class="text-sm text-slate-600">Carica un'immagine, poi applica le azioni disponibili. Supporta JPG/PNG/WebP. Per più immagini (collage), caricale tutte.</p>
-
-      <input id="imgFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple class="file:mr-3 file:px-3 file:py-2 file:rounded-xl file:border-0 file:bg-slate-800 file:text-white file:text-sm file:cursor-pointer"/>
-
-      <div class="grid md:grid-cols-2 gap-4">
-        <div class="grid gap-3">
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-sm font-medium">Larghezza (px)</label>
-              <input id="resizeW" type="number" class="border rounded px-3 py-2 w-full" placeholder="Es. 1200" />
-            </div>
-            <div>
-              <label class="text-sm font-medium">Altezza (px)</label>
-              <input id="resizeH" type="number" class="border rounded px-3 py-2 w-full" placeholder="Auto se vuoto" />
-            </div>
-          </div>
-          <div class="grid grid-cols-3 gap-2 items-end">
-            <div>
-              <label class="text-sm font-medium">Formato export</label>
-              <select id="format" class="border rounded px-3 py-2 w-full">
-                <option value="image/jpeg">JPG</option>
-                <option value="image/webp">WEBP</option>
-                <option value="image/png">PNG</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-sm font-medium">Qualità (0–1)</label>
-              <input id="quality" type="number" min="0" max="1" step="0.05" value="0.8" class="border rounded px-3 py-2 w-full" />
-            </div>
-            <button id="btnProcessImg" class="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm hover:opacity-90">Applica</button>
-          </div>
-
-          <div class="grid grid-cols-5 gap-2 items-end">
-            <div>
-              <label class="text-sm font-medium">Crop X</label>
-              <input id="cropX" type="number" value="0" class="border rounded px-2 py-1 w-full" />
-            </div>
-            <div>
-              <label class="text-sm font-medium">Crop Y</label>
-              <input id="cropY" type="number" value="0" class="border rounded px-2 py-1 w-full" />
-            </div>
-            <div>
-              <label class="text-sm font-medium">Crop W</label>
-              <input id="cropW" type="number" value="0" class="border rounded px-2 py-1 w-full" />
-            </div>
-            <div>
-              <label class="text-sm font-medium">Crop H</label>
-              <input id="cropH" type="number" value="0" class="border rounded px-2 py-1 w-full" />
-            </div>
-            <button id="btnCrop" class="px-4 py-2 rounded-xl bg-slate-600 text-white text-sm hover:opacity-90">Ritaglia</button>
-          </div>
-
-          <div class="grid grid-cols-3 gap-2 items-end">
-            <button id="btnCollageRow" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm hover:opacity-90">Collage in riga</button>
-            <button id="btnCollageGrid" class="px-4 py-2 rounded-xl bg-emerald-700 text-white text-sm hover:opacity-90">Collage griglia 2×2</button>
-            <a id="dlImage" class="px-4 py-2 rounded-xl bg-slate-200 text-slate-800 text-sm hover:bg-slate-300 hidden" download="immagine_elaborata.png">Scarica immagine</a>
-          </div>
-        </div>
-        <div class="bg-slate-50 rounded-xl p-3 grid gap-2">
-          <canvas id="canvas" class="w-full rounded border bg-white"></canvas>
-          <small class="text-slate-500">Anteprima (canvas). Seleziona un'immagine per iniziare.</small>
-        </div>
-      </div>
-    </section>
+    <details class="mt-6 text-sm text-slate-600">
+      <summary class="cursor-pointer font-medium">Note utili</summary>
+      <ul class="list-disc pl-5 mt-2 space-y-1">
+        <li>Video lunghi possono richiedere tempo: l’elaborazione avviene nel tuo browser.</li>
+        <li>Per restare stabile, usa nomi file senza spazi o simboli strani (<code>subs.ass</code>, <code>subs.srt</code>, ecc.).</li>
+        <li>Per sottotitoli colorati, usa <code>.ass</code> (o genera l’ASS dal tuo SRT con il pulsante sopra).</li>
+      </ul>
+    </details>
   </main>
 
   <script>
-    // ---------- UI TABS ----------
-    const tabVideo = document.getElementById('tabVideo');
-    const tabImages = document.getElementById('tabImages');
-    const videoPanel = document.getElementById('videoPanel');
-    const imagesPanel = document.getElementById('imagesPanel');
-
-    tabVideo.addEventListener('click', () => {
-      videoPanel.classList.remove('hidden');
-      imagesPanel.classList.add('hidden');
-    });
-    tabImages.addEventListener('click', () => {
-      imagesPanel.classList.remove('hidden');
-      videoPanel.classList.add('hidden');
-    });
-
-    // ---------- FFmpeg (video + subs) ----------
-    const { createFFmpeg, fetchFile } = FFmpeg; // dalla CDN @ffmpeg/ffmpeg
+    // ------- FFmpeg setup -------
+    const { createFFmpeg, fetchFile } = FFmpeg;
     const ffmpeg = createFFmpeg({
       log: true,
       corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
     });
 
+    // ------- UI refs -------
     const videoFile = document.getElementById('videoFile');
     const subsFile  = document.getElementById('subsFile');
     const btnBurn   = document.getElementById('btnBurn');
@@ -177,10 +107,11 @@
     const assFontSize= document.getElementById('assFontSize');
     const assOutline = document.getElementById('assOutline');
 
-    let generatedASS = null; // Blob URL dell'.ass generato (se creato da .srt)
+    let generatedASS = null; // Blob URL del .ass creato da .srt (se usato)
 
+    // ------- Helpers: SRT -> ASS -------
     function rgbToAssHex(rgb) {
-      // Input: '#RRGGBB' -> ASS usa &HBBGGRR& (ordine inverso, senza #)
+      // '#RRGGBB' -> ASS usa &HBBGGRR&
       const r = parseInt(rgb.slice(1,3), 16);
       const g = parseInt(rgb.slice(3,5), 16);
       const b = parseInt(rgb.slice(5,7), 16);
@@ -212,11 +143,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         // "00:00:01,000" -> "0:00:01.00"
         const [h,m,sms] = t.split(':');
         const [s, ms] = sms.split(',');
-        const cs = Math.round(parseInt(ms,10)/10); // centesimi
+        const cs = Math.round(parseInt(ms,10)/10);
         return `${parseInt(h,10)}:${m}:${s}.${cs.toString().padStart(2,'0')}`;
       }
       while(i < lines.length) {
-        const idx = lines[i++]; // index riga (ignorato)
+        const idx = lines[i++]; // numero riga (ignorato)
         if(!idx) continue;
         const time = lines[i++] || '';
         const match = time.match(/(\d\d:\d\d:\d\d,\d\d\d)\s+-->\s+(\d\d:\d\d:\d\d,\d\d\d)/);
@@ -228,7 +159,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           textLines.push(lines[i++]);
         }
         i++; // salta riga vuota
-        const txt = textLines.join('\\N').replace(/\{\\.*?\}/g,'');
+        const txt = textLines.join('\\N').replace(/\\{\\.*?\\}/g,'');
         events.push(`Dialogue: 0,${start},${end},Default,,0,0,0,,${txt}`);
       }
       return header + events.join('\n') + '\n';
@@ -239,26 +170,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       if(!file) { assMakeMsg.textContent = 'Carica prima un file .srt.'; return; }
       if(!file.name.toLowerCase().endsWith('.srt')) { assMakeMsg.textContent = 'Il generatore funziona solo con .srt.'; return; }
       const srt = await file.text();
-      const assText = srtToAss(srt, assColor.value, parseInt(assFontSize.value,10)||28, parseInt(assOutline.value,10)||2);
+      const assText = srtToAss(
+        srt,
+        assColor.value,
+        parseInt(assFontSize.value,10)||28,
+        parseInt(assOutline.value,10)||2
+      );
       const blob = new Blob([assText], {type:'text/plain'});
       generatedASS = URL.createObjectURL(blob);
       assMakeMsg.textContent = 'Creato .ass colorato (verrà usato automaticamente al prossimo export).';
     });
 
+    // ------- Azione: burn-in -------
     btnBurn.addEventListener('click', async () => {
       const v = videoFile.files?.[0];
       const s = subsFile.files?.[0] || null;
       if(!v) { alert('Seleziona un file video.'); return; }
+
       statusEl.textContent = 'Caricamento librerie…';
       try {
         if(!ffmpeg.isLoaded()) await ffmpeg.load();
-        statusEl.textContent = 'Preparazione files…';
+
+        statusEl.textContent = 'Preparazione file…';
         ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(v));
 
         let subsName = null;
         if (generatedASS) {
           // se abbiamo generato un .ass dal .srt, usiamo quello
-          const res = await fetch(generatedASS); const buf = new Uint8Array(await res.arrayBuffer());
+          const res = await fetch(generatedASS);
+          const buf = new Uint8Array(await res.arrayBuffer());
           ffmpeg.FS('writeFile', 'subs.ass', buf);
           subsName = 'subs.ass';
         } else if (s) {
@@ -268,6 +208,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           subsName = name;
         } else {
           alert('Carica un file sottotitoli (.srt o .ass), oppure genera un .ass dal tuo .srt.');
+          statusEl.textContent = '';
           return;
         }
 
@@ -282,6 +223,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         const data = ffmpeg.FS('readFile','output.mp4');
         const blob = new Blob([data.buffer], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
+
         outVideo.src = url;
         outVideo.classList.remove('hidden');
         outDownload.href = url;
@@ -289,110 +231,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         statusEl.textContent = 'Fatto!';
       } catch (err) {
         console.error(err);
-        statusEl.textContent = 'Errore durante l\'elaborazione. Vedi console del browser.';
+        statusEl.textContent = 'Errore durante l\'elaborazione. Apri la console del browser per i dettagli.';
       }
-    });
-
-    // ---------- IMAGE TOOLS (Canvas) ----------
-    const imgFiles = document.getElementById('imgFiles');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const resizeW = document.getElementById('resizeW');
-    const resizeH = document.getElementById('resizeH');
-    const format  = document.getElementById('format');
-    const quality = document.getElementById('quality');
-    const btnProcessImg = document.getElementById('btnProcessImg');
-    const btnCrop = document.getElementById('btnCrop');
-    const cropX = document.getElementById('cropX');
-    const cropY = document.getElementById('cropY');
-    const cropW = document.getElementById('cropW');
-    const cropH = document.getElementById('cropH');
-    const btnCollageRow  = document.getElementById('btnCollageRow');
-    const btnCollageGrid = document.getElementById('btnCollageGrid');
-    const dlImage = document.getElementById('dlImage');
-
-    let currentImg = null; // HTMLImageElement della prima immagine caricata
-
-    function loadImage(file) {
-      return new Promise((res, rej) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => { URL.revokeObjectURL(url); res(img); };
-        img.onerror = rej;
-        img.src = url;
-      });
-    }
-
-    function drawToCanvas(img, w = null, h = null) {
-      // Mantieni proporzioni se solo uno dei due è definito
-      if (w && !h) h = Math.round(img.height * (w / img.width));
-      if (h && !w) w = Math.round(img.width  * (h / img.height));
-      if (!w) w = img.width; if(!h) h = img.height;
-      canvas.width = w; canvas.height = h;
-      ctx.clearRect(0,0,w,h);
-      ctx.drawImage(img, 0, 0, w, h);
-    }
-
-    function exportCanvas() {
-      const mime = format.value;
-      const q = mime === 'image/png' ? undefined : Number(quality.value) || 0.8;
-      const dataURL = canvas.toDataURL(mime, q);
-      dlImage.href = dataURL;
-      dlImage.classList.remove('hidden');
-    }
-
-    imgFiles.addEventListener('change', async (e) => {
-      const files = Array.from(e.target.files||[]);
-      if (!files.length) return;
-      currentImg = await loadImage(files[0]);
-      drawToCanvas(currentImg);
-      exportCanvas();
-    });
-
-    btnProcessImg.addEventListener('click', () => {
-      if (!currentImg) { alert('Carica un\'immagine.'); return; }
-      const w = parseInt(resizeW.value,10) || null;
-      const h = parseInt(resizeH.value,10) || null;
-      drawToCanvas(currentImg, w, h);
-      exportCanvas();
-    });
-
-    btnCrop.addEventListener('click', () => {
-      const x = parseInt(cropX.value,10)||0;
-      const y = parseInt(cropY.value,10)||0;
-      const w = parseInt(cropW.value,10)||canvas.width;
-      const h = parseInt(cropH.value,10)||canvas.height;
-      const imgData = ctx.getImageData(x, y, Math.min(w, canvas.width-x), Math.min(h, canvas.height-y));
-      canvas.width = imgData.width; canvas.height = imgData.height;
-      ctx.putImageData(imgData, 0, 0);
-      exportCanvas();
-    });
-
-    btnCollageRow.addEventListener('click', async () => {
-      const files = Array.from(imgFiles.files||[]);
-      if (files.length < 2) { alert('Seleziona almeno 2 immagini per il collage.'); return; }
-      const imgs = await Promise.all(files.map(loadImage));
-      const totalW = imgs.reduce((acc, im) => acc + im.width, 0);
-      const maxH = Math.max(...imgs.map(im => im.height));
-      canvas.width = totalW; canvas.height = maxH;
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      let x=0; for (const im of imgs) { ctx.drawImage(im, x, 0); x += im.width; }
-      exportCanvas();
-    });
-
-    btnCollageGrid.addEventListener('click', async () => {
-      const files = Array.from(imgFiles.files||[]);
-      if (files.length < 4) { alert('Seleziona almeno 4 immagini per la griglia 2×2.'); return; }
-      const imgs = await Promise.all(files.slice(0,4).map(loadImage));
-      const w = Math.max(imgs[0].width, imgs[1].width);
-      const h = Math.max(imgs[0].height, imgs[1].height);
-      canvas.width = w*2; canvas.height = h*2;
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(imgs[0], 0, 0, w, h);
-      ctx.drawImage(imgs[1], w, 0, w, h);
-      ctx.drawImage(imgs[2], 0, h, w, h);
-      ctx.drawImage(imgs[3], w, h, w, h);
-      exportCanvas();
     });
   </script>
 </body>
