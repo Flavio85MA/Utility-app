@@ -880,7 +880,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
   let ffmpeg = null, ffLoaded = false;
   async function getFF(updateCb, statusEl) {
-  // Trova la classe FFmpeg esposta dalle UMD
+  // Trova la classe FFmpeg esposta dalle UMD già caricate in <head>
   const FFClass =
     (window.FFmpeg && window.FFmpeg.FFmpeg) ||
     window.FFmpeg ||
@@ -892,19 +892,19 @@ document.addEventListener('DOMContentLoaded', () => {
     throw new Error(msg);
   }
 
-  // Riuso se già caricato
+  // Riuso se già inizializzato
   if (ffmpeg && ffLoaded) {
     try { ffmpeg.off?.('progress'); } catch {}
     ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
     return ffmpeg;
   }
 
-  // Istanziamo e agganciamo log/progress
+  // Istanza + log/progress
   ffmpeg = new FFClass();
   ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
   ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
 
-  // Helper da @ffmpeg/util UMD
+  // Helpers da @ffmpeg/util (già inclusa in <head>)
   const UtilNS = window.FFmpegUtil || {};
   const toBlobURLFF = UtilNS.toBlobURL || (async (url, mime) => {
     const res = await fetch(url);
@@ -913,41 +913,34 @@ document.addEventListener('DOMContentLoaded', () => {
     return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
   });
 
-  // CDN di fallback
-  const CANDIDATES = [
-    {
-      ffmpegBase: 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist',
-      coreBase:   'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
-    },
-    {
-      ffmpegBase: 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist',
-      coreBase:   'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd',
-    },
+  // Usiamo il CORE UMD (single-thread) e passiamo TUTTI e 3 gli URL come blob
+  const CORE_BASES = [
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
+    'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd'
   ];
 
   let lastErr = null;
 
-  // Proviamo più CDN. Notare: usiamo **esm/worker.js** (nome stabile) come classWorker,
-  // ma core JS/WASM restano UMD.
-  for (const { ffmpegBase, coreBase } of CANDIDATES) {
+  for (const coreBase of CORE_BASES) {
     try {
-      const coreURL  = await toBlobURLFF(`${coreBase}/ffmpeg-core.js`,  'text/javascript');
-      const wasmURL  = await toBlobURLFF(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm');
-      const classWorkerURL = await toBlobURLFF(`${ffmpegBase}/esm/worker.js`, 'text/javascript');
+      statusEl && (statusEl.textContent = `Carico FFmpeg core da ${new URL(coreBase).host}...`);
 
-      statusEl && (statusEl.textContent = `Carico FFmpeg (${new URL(ffmpegBase).host})...`);
-      await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+      // Questi tre sono fondamentali: core, wasm e **worker del core**
+      const coreURL   = await toBlobURLFF(`${coreBase}/ffmpeg-core.js`,        'text/javascript');
+      const wasmURL   = await toBlobURLFF(`${coreBase}/ffmpeg-core.wasm`,      'application/wasm');
+      const workerURL = await toBlobURLFF(`${coreBase}/ffmpeg-core.worker.js`, 'text/javascript');
 
+      await ffmpeg.load({ coreURL, wasmURL, workerURL }); // <-- workerURL è la chiave
       ffLoaded = true;
       return ffmpeg;
     } catch (e) {
-      console.warn('[ffmpeg] load fallita su', ffmpegBase, e);
+      console.warn('[ffmpeg] load fallita su', coreBase, e);
       lastErr = e;
     }
   }
 
-  const msg = 'Impossibile caricare ffmpeg-core/worker (rete/CSP?). Vedi console.';
-  statusEl && (statusEl.textContent = msg);
+  const msg = 'Impossibile caricare ffmpeg-core/worker (rete/CSP?).';
+  statusEl && (statusEl.textContent = `${msg} Vedi console.`);
   throw new Error(msg + (lastErr ? ` — ${lastErr.message || lastErr}` : ''));
 }
 
@@ -1188,3 +1181,4 @@ document.addEventListener('DOMContentLoaded', () => {
   })();
 
 }); // DOMContentLoaded
+
