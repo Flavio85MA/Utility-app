@@ -1,0 +1,59 @@
+<!doctype html>
+if (!files.length) return;
+currentImg = await loadImage(files[0]);
+drawToCanvas(currentImg);
+exportCanvas();
+});
+
+
+btnProcessImg.addEventListener('click', () => {
+if (!currentImg) { alert('Carica un\'immagine.'); return; }
+const w = parseInt(resizeW.value,10) || null;
+const h = parseInt(resizeH.value,10) || null;
+drawToCanvas(currentImg, w, h);
+exportCanvas();
+});
+
+
+btnCrop.addEventListener('click', () => {
+const x = parseInt(cropX.value,10)||0;
+const y = parseInt(cropY.value,10)||0;
+const w = parseInt(cropW.value,10)||canvas.width;
+const h = parseInt(cropH.value,10)||canvas.height;
+const imgData = ctx.getImageData(x, y, Math.min(w, canvas.width-x), Math.min(h, canvas.height-y));
+canvas.width = imgData.width; canvas.height = imgData.height;
+ctx.putImageData(imgData, 0, 0);
+exportCanvas();
+});
+
+
+btnCollageRow.addEventListener('click', async () => {
+const files = Array.from(imgFiles.files||[]);
+if (files.length < 2) { alert('Seleziona almeno 2 immagini per il collage.'); return; }
+const imgs = await Promise.all(files.map(loadImage));
+const totalW = imgs.reduce((acc, im) => acc + im.width, 0);
+const maxH = Math.max(...imgs.map(im => im.height));
+canvas.width = totalW; canvas.height = maxH;
+ctx.clearRect(0,0,canvas.width,canvas.height);
+let x=0; for (const im of imgs) { ctx.drawImage(im, x, 0); x += im.width; }
+exportCanvas();
+});
+
+
+btnCollageGrid.addEventListener('click', async () => {
+const files = Array.from(imgFiles.files||[]);
+if (files.length < 4) { alert('Seleziona almeno 4 immagini per la griglia 2×2.'); return; }
+const imgs = await Promise.all(files.slice(0,4).map(loadImage));
+const w = Math.max(imgs[0].width, imgs[1].width);
+const h = Math.max(imgs[0].height, imgs[1].height);
+canvas.width = w*2; canvas.height = h*2;
+ctx.clearRect(0,0,canvas.width,canvas.height);
+ctx.drawImage(imgs[0], 0, 0, w, h);
+ctx.drawImage(imgs[1], w, 0, w, h);
+ctx.drawImage(imgs[2], 0, h, w, h);
+ctx.drawImage(imgs[3], w, h, w, h);
+exportCanvas();
+});
+</script>
+</body>
+</html>
