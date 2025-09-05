@@ -3,12 +3,23 @@ name: Fetch FFmpeg core
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write   # <<--- fondamentale per poter fare push
+
 jobs:
   fetch-core:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Create folders
         run: |
@@ -17,15 +28,19 @@ jobs:
 
       - name: Download FFmpeg core (UMD) & worker (ESM)
         run: |
-          curl -L "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js" -o vendor/ffmpeg/umd/ffmpeg-core.js
-          curl -L "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm" -o vendor/ffmpeg/umd/ffmpeg-core.wasm
-          curl -L "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js" -o vendor/ffmpeg/umd/ffmpeg-core.worker.js
-          curl -L "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js" -o vendor/ffmpeg/esm/worker.js
+          set -e
+          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js" -o vendor/ffmpeg/umd/ffmpeg-core.js
+          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm" -o vendor/ffmpeg/umd/ffmpeg-core.wasm
+          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js" -o vendor/ffmpeg/umd/ffmpeg-core.worker.js
+          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js" -o vendor/ffmpeg/esm/worker.js
 
-      - name: Commit files
+      - name: Commit and push files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add vendor/ffmpeg
-          git commit -m "Add ffmpeg core files (UMD + worker)" || echo "No changes"
-          git push
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add ffmpeg core files (UMD + worker)"
+          fi
+          git pull --rebase origin "${{ github.ref_name }}" || true
+          git push origin HEAD:"${{ github.ref_name }}"
