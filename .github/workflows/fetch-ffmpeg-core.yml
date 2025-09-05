@@ -1,13 +1,14 @@
-name: Fetch FFmpeg core
+name: Import FFmpeg core (PR)
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # <<--- fondamentale per poter fare push
+  contents: write
+  pull-requests: write
 
 jobs:
-  fetch-core:
+  import-core:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,32 +16,50 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Pick names
+        id: prep
+        run: echo "BRANCH=ffmpeg-core-$(date +%s)" >> $GITHUB_OUTPUT
 
-      - name: Create folders
-        run: |
-          mkdir -p vendor/ffmpeg/umd
-          mkdir -p vendor/ffmpeg/esm
+      - name: Create branch and upload files via API
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const base = context.ref.replace('refs/heads/',''); // es. "main"
+            const head = "${{ steps.prep.outputs.BRANCH }}";
 
-      - name: Download FFmpeg core (UMD) & worker (ESM)
-        run: |
-          set -e
-          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js" -o vendor/ffmpeg/umd/ffmpeg-core.js
-          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm" -o vendor/ffmpeg/umd/ffmpeg-core.wasm
-          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js" -o vendor/ffmpeg/umd/ffmpeg-core.worker.js
-          curl -fL "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js" -o vendor/ffmpeg/esm/worker.js
+            // 1) crea branch dal base
+            const baseRef = await github.rest.git.getRef({owner, repo, ref: `heads/${base}`});
+            await github.rest.git.createRef({owner, repo, ref: `refs/heads/${head}`, sha: baseRef.data.object.sha});
 
-      - name: Commit and push files
-        run: |
-          git add vendor/ffmpeg
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Add ffmpeg core files (UMD + worker)"
-          fi
-          git pull --rebase origin "${{ github.ref_name }}" || true
-          git push origin HEAD:"${{ github.ref_name }}"
+            async function addFile(url, path) {
+              const res = await fetch(url);
+              if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
+              const buf = Buffer.from(await res.arrayBuffer());
+              const content = buf.toString('base64');
+              await github.rest.repos.createOrUpdateFileContents({
+                owner, repo, path,
+                message: `Add ${path}`,
+                content,
+                branch: head
+              });
+            }
+
+            // 2) scarica dai CDN e carica nel repo (same-origin)
+            await addFile('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js', 'vendor/ffmpeg/umd/ffmpeg-core.js');
+            await addFile('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm', 'vendor/ffmpeg/umd/ffmpeg-core.wasm');
+            await addFile('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js', 'vendor/ffmpeg/umd/ffmpeg-core.worker.js');
+            await addFile('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js', 'vendor/ffmpeg/esm/worker.js');
+
+            // 3) apri PR
+            const { data: pr } = await github.rest.pulls.create({
+              owner, repo,
+              title: 'Add FFmpeg core (UMD) + worker (same-origin)',
+              head, base,
+              body: 'Adds vendor/ffmpeg/* assets for same-origin loading on GitHub Pages.'
+            });
+            core.setOutput('pr_url', pr.html_url);
+
+      - name: Echo PR URL
+        run: echo "PR opened. Check the 'Create branch and upload files via API' step logs for the link."
