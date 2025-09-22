@@ -879,33 +879,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
   let ffmpeg = null, ffLoaded = false;
-  // === PATCH DEFINITIVA: getFF con jsDelivr + classWorker blob, senza workerURL ===
+  // === PATCH FINALE: usa core 0.12.6 + forza class worker in blob same-origin ===
 async function getFF(updateCb, statusEl){
-  // Individua la classe FFmpeg esposta dalle UMD caricate nel <head>
+  // 1) Individua la classe FFmpeg esposta dalle UMD già incluse nel <head>
   const FFClass =
     (window.FFmpeg && window.FFmpeg.FFmpeg) ||
     window.FFmpeg ||
     (window.FFmpegWASM && window.FFmpegWASM.FFmpeg);
 
   if (!FFClass) {
-    const msg = 'FFmpeg UMD non trovata: assicurati di avere nel <head> @ffmpeg/ffmpeg e @ffmpeg/util PRIMA di script.js.';
+    const msg = 'FFmpeg UMD non trovata: assicurati che @ffmpeg/ffmpeg e @ffmpeg/util siano PRIMA di script.js.';
     statusEl && (statusEl.textContent = msg);
     throw new Error(msg);
   }
 
-  // Riusa se già inizializzato
+  // 2) Riuso
   if (ffmpeg && ffLoaded) {
     try { ffmpeg.off?.('progress'); } catch {}
     ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
     return ffmpeg;
   }
 
-  // Istanza + log/progress
+  // 3) Istanza + log/progress
   ffmpeg = new FFClass();
   ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
   ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
 
-  // Helpers da @ffmpeg/util (UMD); fallback manuale se non presente
+  // 4) Helpers da @ffmpeg/util (fallback manuale se non presente)
   const UtilNS = window.FFmpegUtil || {};
   const toBlobURLFF = UtilNS.toBlobURL || (async (url, mime) => {
     const res = await fetch(url, { mode: 'cors' });
@@ -914,29 +914,51 @@ async function getFF(updateCb, statusEl){
     return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
   });
 
-  // Sorgenti (SOLO jsDelivr)
-  const CORE_JS   = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js';
-  const CORE_WASM = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm';
-  const CLASS_WRK = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js';
+  // 5) Sorgenti:
+  //    - core UMD versione 0.12.6 (questa ESPONE il worker file, niente 404)
+  //    - class worker ESM (worker.js) che useremo come blob same-origin al posto di 814.ffmpeg.js
+  const CORE_VER   = '0.12.6';
+  const CORE_BASE  = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VER}/dist/umd`;
+  const CORE_JS    = `${CORE_BASE}/ffmpeg-core.js`;
+  const CORE_WASM  = `${CORE_BASE}/ffmpeg-core.wasm`;
+  const CORE_WORK  = `${CORE_BASE}/ffmpeg-core.worker.js`;
+  const CLASS_WRK  = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js';
+
+  // 6) Crea BLOB URL (same-origin) per tutto
+  statusEl && (statusEl.textContent = 'Carico FFmpeg (core + wasm + worker)…');
+  const coreURL        = await toBlobURLFF(CORE_JS,   'text/javascript');
+  const wasmURL        = await toBlobURLFF(CORE_WASM, 'application/wasm');
+  const workerURL      = await toBlobURLFF(CORE_WORK, 'text/javascript');
+  const classWorkerURL = await toBlobURLFF(CLASS_WRK, 'text/javascript');
+
+  // 7) **Patch di compatibilità**:
+  //    Alcune build UMD provano comunque a creare il class worker "814.ffmpeg.js".
+  //    Intercettiamo la creazione e sostituiamo con il nostro classWorkerURL (blob).
+  const NativeWorker = window.Worker;
+  window.Worker = function(spec, opts){
+    try{
+      const href = (spec && spec.href) ? spec.href : String(spec || '');
+      // se prova a usare l'814.ffmpeg.js (UMD), rimpiazziamo
+      if (href.includes('@ffmpeg/ffmpeg') && href.endsWith('/814.ffmpeg.js')) {
+        return new NativeWorker(classWorkerURL, opts);
+      }
+    }catch(_){}
+    return new NativeWorker(spec, opts);
+  };
 
   try {
-    statusEl && (statusEl.textContent = 'Carico FFmpeg (core + wasm + worker)…');
-
-    // IMPORTANTISSIMO: passiamo SOLO coreURL/wasmURL + classWorkerURL (blob).
-    // NON impostare "workerURL" (quel file non serve e crea 404/CORS).
-    const coreURL        = await toBlobURLFF(CORE_JS,   'text/javascript');
-    const wasmURL        = await toBlobURLFF(CORE_WASM, 'application/wasm');
-    const classWorkerURL = await toBlobURLFF(CLASS_WRK, 'text/javascript');
-
-    await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
-
+    // 8) Carica passando TUTTI e tre i parametri del core + (indirettamente) class worker patchato
+    await ffmpeg.load({ coreURL, wasmURL, workerURL });
     ffLoaded = true;
     return ffmpeg;
   } catch (e) {
     console.error('[ffmpeg] load error', e);
-    const msg = 'Impossibile caricare ffmpeg-core/worker (controlla rete/estensioni).';
+    const msg = 'Impossibile caricare ffmpeg-core/worker. Dettagli in console.';
     statusEl && (statusEl.textContent = msg);
     throw new Error(msg);
+  } finally {
+    // 9) Ripristina Worker nativo (non vogliamo toccare altri componenti della pagina)
+    window.Worker = NativeWorker;
   }
 }
 // === FINE PATCH ===
@@ -1177,5 +1199,6 @@ async function getFF(updateCb, statusEl){
   })();
 
 }); // DOMContentLoaded
+
 
 
