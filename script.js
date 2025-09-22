@@ -879,10 +879,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
   let ffmpeg = null, ffLoaded = false;
-  // === Loader FFmpeg: prima single-thread (senza core worker), poi fallback multi-thread.
-//     Patch sempre attiva per il "class worker" 814.ffmpeg.js (usa ESM worker come module) ===
+  // === Loader FFmpeg: prova prima single-thread (senza core worker), poi fallback multi-thread.
+//     Patch SEMPRE ATTIVA per il "class worker" 814.ffmpeg.js (lo rimpiazziamo con l’ESM worker via Blob URL) ===
 async function getFF(updateCb, statusEl){
-  // 1) Classe FFmpeg dalle UMD già incluse nel <head>
+  // 1) Classe FFmpeg esposta dalle UMD già caricate nel <head>
   const FFClass =
     (window.FFmpeg && window.FFmpeg.FFmpeg) ||
     window.FFmpeg ||
@@ -894,19 +894,19 @@ async function getFF(updateCb, statusEl){
     throw new Error(msg);
   }
 
-  // 2) Riuso
+  // 2) Riusa istanza se già caricata
   if (ffmpeg && ffLoaded) {
     try { ffmpeg.off?.('progress'); } catch {}
     ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
     return ffmpeg;
   }
 
-  // 3) Instanza + log/progress
+  // 3) Istanzia + log/progress
   ffmpeg = new FFClass();
-  ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
+  ffmpeg.on?.('log',      ({ message }) => console.log('[ffmpeg]', message));
   ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
 
-  // 4) Helper toBlobURL (fallback se @ffmpeg/util non c’è)
+  // 4) toBlobURL (se @ffmpeg/util non c’è)
   const UtilNS = window.FFmpegUtil || {};
   const toBlobURLFF = UtilNS.toBlobURL || (async (url, mime) => {
     const res = await fetch(url, { mode: 'cors' });
@@ -915,7 +915,7 @@ async function getFF(updateCb, statusEl){
     return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
   });
 
-  // 5) Prepara SEMPRE il class worker ESM come Blob URL e patcha Worker
+  // 5) PREPARA SEMPRE il class worker ESM come Blob URL e patcha Worker
   //    (serve sia in single-thread che in multi-thread)
   const classWorkerURL = await toBlobURLFF(
     'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
@@ -925,10 +925,9 @@ async function getFF(updateCb, statusEl){
   const NativeWorker = window.Worker;
   window.Worker = function(spec, opts){
     try{
-      // spec può essere stringa o URL; normalizziamo in stringa
       const href = (spec && spec.href) ? spec.href : String(spec || '');
-      // Se la UMD prova a caricare il suo 814.ffmpeg.js, rimpiazziamo con l’ESM (module)
-      if (href.includes('@ffmpeg/ffmpeg') && href.endsWith('/814.ffmpeg.js')) {
+      // intercetta QUALSIASI tentativo di caricare 814.ffmpeg.js da CDN
+      if (href.includes('814.ffmpeg.js')) {
         const o = Object.assign({}, opts, { type: 'module' });
         return new NativeWorker(classWorkerURL, o);
       }
@@ -937,38 +936,37 @@ async function getFF(updateCb, statusEl){
   };
 
   async function loadSingleThread(){
-    // Percorsi CORRETTI (niente /umd)
+    // PERCORSI CORRETTI: @ffmpeg/core-st NON ha "/umd" → usa /dist
     const VER  = '0.12.6';
     const BASE = `https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@${VER}/dist`;
     const coreURL = await toBlobURLFF(`${BASE}/ffmpeg-core.js`,   'text/javascript');
     const wasmURL = await toBlobURLFF(`${BASE}/ffmpeg-core.wasm`, 'application/wasm');
     statusEl && (statusEl.textContent = 'Carico FFmpeg (single-thread)…');
-    await ffmpeg.load({ coreURL, wasmURL }); // single-thread: nessun workerURL
+    await ffmpeg.load({ coreURL, wasmURL });  // niente workerURL in single-thread
     ffLoaded = true;
   }
 
   async function loadMultiThread(){
-    // Percorsi CORRETTI (niente /umd) + core worker
+    // PERCORSI CORRETTI: @ffmpeg/core multi-thread → /dist (NO /umd)
     const VER  = '0.12.6';
     const BASE = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${VER}/dist`;
     const coreURL   = await toBlobURLFF(`${BASE}/ffmpeg-core.js`,        'text/javascript');
     const wasmURL   = await toBlobURLFF(`${BASE}/ffmpeg-core.wasm`,      'application/wasm');
     const workerURL = await toBlobURLFF(`${BASE}/ffmpeg-core.worker.js`, 'text/javascript');
-
     statusEl && (statusEl.textContent = 'Carico FFmpeg (multi-thread)…');
     await ffmpeg.load({ coreURL, wasmURL, workerURL });
     ffLoaded = true;
   }
 
   try {
-    // 6) Prova prima single-thread (niente core worker → meno CORS)
+    // 6) Prima tentiamo single-thread (meno rogne di CORS)
     await loadSingleThread();
   } catch (e1) {
-    console.warn('[ffmpeg] single-thread fallito, provo multi-thread:', e1);
-    // 7) Fallback: multi-thread con core worker
+    console.warn('[ffmpeg] single-thread fallito, provo multithread:', e1);
+    // 7) Fallback: multi-thread
     await loadMultiThread();
   } finally {
-    // 8) Ripristina sempre il Worker nativo (evita effetti collaterali)
+    // 8) Ripristina SEMPRE il Worker nativo
     window.Worker = NativeWorker;
   }
 
@@ -1211,6 +1209,7 @@ async function getFF(updateCb, statusEl){
   })();
 
 }); // DOMContentLoaded
+
 
 
 
