@@ -879,9 +879,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
   let ffmpeg = null, ffLoaded = false;
-  // === PATCH: usa core single-thread (niente worker) con fallback multithread ===
+  // === Loader FFmpeg: prima single-thread (senza core worker), poi fallback multi-thread.
+//     Patch sempre attiva per il "class worker" 814.ffmpeg.js (usa ESM worker come module) ===
 async function getFF(updateCb, statusEl){
-  // 1) Prendi la classe FFmpeg esposta dalle UMD già incluse nel <head>
+  // 1) Classe FFmpeg dalle UMD già incluse nel <head>
   const FFClass =
     (window.FFmpeg && window.FFmpeg.FFmpeg) ||
     window.FFmpeg ||
@@ -893,19 +894,19 @@ async function getFF(updateCb, statusEl){
     throw new Error(msg);
   }
 
-  // 2) Reuse
+  // 2) Riuso
   if (ffmpeg && ffLoaded) {
     try { ffmpeg.off?.('progress'); } catch {}
     ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
     return ffmpeg;
   }
 
-  // 3) Istanza + eventi
+  // 3) Instanza + log/progress
   ffmpeg = new FFClass();
   ffmpeg.on?.('log', ({ message }) => console.log('[ffmpeg]', message));
   ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
 
-  // 4) Helper toBlobURL (se @ffmpeg/util non c’è, fallback manuale)
+  // 4) Helper toBlobURL (fallback se @ffmpeg/util non c’è)
   const UtilNS = window.FFmpegUtil || {};
   const toBlobURLFF = UtilNS.toBlobURL || (async (url, mime) => {
     const res = await fetch(url, { mode: 'cors' });
@@ -914,66 +915,65 @@ async function getFF(updateCb, statusEl){
     return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
   });
 
-  // ---- Loader #1: SINGLE THREAD (niente worker) ----
-  async function loadSingleThread() {
-    const VER   = '0.12.6';
-    const BASE  = `https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@${VER}/dist/umd`;
+  // 5) Prepara SEMPRE il class worker ESM come Blob URL e patcha Worker
+  //    (serve sia in single-thread che in multi-thread)
+  const classWorkerURL = await toBlobURLFF(
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
+    'text/javascript'
+  );
+
+  const NativeWorker = window.Worker;
+  window.Worker = function(spec, opts){
+    try{
+      // spec può essere stringa o URL; normalizziamo in stringa
+      const href = (spec && spec.href) ? spec.href : String(spec || '');
+      // Se la UMD prova a caricare il suo 814.ffmpeg.js, rimpiazziamo con l’ESM (module)
+      if (href.includes('@ffmpeg/ffmpeg') && href.endsWith('/814.ffmpeg.js')) {
+        const o = Object.assign({}, opts, { type: 'module' });
+        return new NativeWorker(classWorkerURL, o);
+      }
+    }catch(_){}
+    return new NativeWorker(spec, opts);
+  };
+
+  async function loadSingleThread(){
+    // Percorsi CORRETTI (niente /umd)
+    const VER  = '0.12.6';
+    const BASE = `https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@${VER}/dist`;
     const coreURL = await toBlobURLFF(`${BASE}/ffmpeg-core.js`,   'text/javascript');
     const wasmURL = await toBlobURLFF(`${BASE}/ffmpeg-core.wasm`, 'application/wasm');
     statusEl && (statusEl.textContent = 'Carico FFmpeg (single-thread)…');
-    await ffmpeg.load({ coreURL, wasmURL }); // <<< Niente workerURL qui
+    await ffmpeg.load({ coreURL, wasmURL }); // single-thread: nessun workerURL
     ffLoaded = true;
   }
 
-  // ---- Loader #2: MULTITHREAD (con patch per il class worker) ----
-  async function loadMultiThread() {
-    const VER   = '0.12.6';
-    const BASE  = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${VER}/dist/umd`;
+  async function loadMultiThread(){
+    // Percorsi CORRETTI (niente /umd) + core worker
+    const VER  = '0.12.6';
+    const BASE = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${VER}/dist`;
     const coreURL   = await toBlobURLFF(`${BASE}/ffmpeg-core.js`,        'text/javascript');
     const wasmURL   = await toBlobURLFF(`${BASE}/ffmpeg-core.wasm`,      'application/wasm');
-    const workerURL = await toBlobURLFF(`${BASE}/ffmpeg-core.worker.js`, 'text/javascript'); // questa versione lo espone
+    const workerURL = await toBlobURLFF(`${BASE}/ffmpeg-core.worker.js`, 'text/javascript');
 
-    // Worker ESM per sostituire l'814.ffmpeg.js classico (bloccato da CORS)
-    const classWorkerURL = await toBlobURLFF(
-      'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
-      'text/javascript'
-    );
-
-    // Patch: se la UMD prova a creare 814.ffmpeg.js, usiamo il nostro ESM come module
-    const NativeWorker = window.Worker;
-    window.Worker = function(spec, opts){
-      try{
-        const href = (spec && spec.href) ? spec.href : String(spec || '');
-        if (href.includes('@ffmpeg/ffmpeg') && href.endsWith('/814.ffmpeg.js')) {
-          // forziamo module
-          const o = Object.assign({}, opts, { type: 'module' });
-          return new NativeWorker(classWorkerURL, o);
-        }
-      }catch(_){}
-      return new NativeWorker(spec, opts);
-    };
-
-    try {
-      statusEl && (statusEl.textContent = 'Carico FFmpeg (multithread)…');
-      await ffmpeg.load({ coreURL, wasmURL, workerURL });
-      ffLoaded = true;
-    } finally {
-      // sempre ripristinare
-      window.Worker = NativeWorker;
-    }
+    statusEl && (statusEl.textContent = 'Carico FFmpeg (multi-thread)…');
+    await ffmpeg.load({ coreURL, wasmURL, workerURL });
+    ffLoaded = true;
   }
 
-  // 5) Prova ST; se fallisce, passa a MT
   try {
+    // 6) Prova prima single-thread (niente core worker → meno CORS)
     await loadSingleThread();
   } catch (e1) {
-    console.warn('[ffmpeg] single-thread fallito, provo multithread:', e1);
+    console.warn('[ffmpeg] single-thread fallito, provo multi-thread:', e1);
+    // 7) Fallback: multi-thread con core worker
     await loadMultiThread();
+  } finally {
+    // 8) Ripristina sempre il Worker nativo (evita effetti collaterali)
+    window.Worker = NativeWorker;
   }
 
   return ffmpeg;
 }
-// === FINE PATCH ===
   // Esegue args con fallback (prova più varianti finché una passa)
   async function execWithFallback(ff, variants){
     let lastErr=null;
@@ -1211,6 +1211,7 @@ async function getFF(updateCb, statusEl){
   })();
 
 }); // DOMContentLoaded
+
 
 
 
