@@ -1,42 +1,44 @@
-// script.js — PDF · Immagini · Video (ffmpeg.wasm)
-// Richiede nel <head> di index.html:
-// <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-// <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+// script.js — Toolkit PDF & Immagini (tabs a bottoni, nessuna sezione video)
 
 document.addEventListener('DOMContentLoaded', () => {
   // =======================
-  // NAV A TAB (bulletproof)
+  // TABS (PDF / IMMAGINI)
   // =======================
-  const ids = ['pdf','images','video'];
+  const TABS = ['pdf', 'images'];
 
-  function setActiveTab(which){
-    ids.forEach(name => {
+  function setActiveTab(which) {
+    TABS.forEach(name => {
       const btn = document.getElementById(`btn-${name}`);
       const sec = document.getElementById(`section-${name}`);
       if (btn) btn.classList.toggle('active', name === which);
       if (sec) sec.classList.toggle('active', name === which);
     });
-    // sincronizza hash (utile per GitHub Pages)
-    if (ids.includes(which)) {
+    // aggiorna hash solo se cambia
+    if (location.hash.replace('#','') !== which) {
       history.replaceState(null, '', `#${which}`);
     }
   }
 
-  // inizializza (da hash se presente, altrimenti pdf)
-  const fromHash = (location.hash || '').replace('#','');
-  setActiveTab(ids.includes(fromHash) ? fromHash : 'pdf');
+  // Iniziale: da hash o default pdf
+  const initial = (location.hash || '').replace('#','');
+  setActiveTab(TABS.includes(initial) ? initial : 'pdf');
 
-  // listener diretti
+  // Click
   document.getElementById('btn-pdf')?.addEventListener('click', () => setActiveTab('pdf'));
   document.getElementById('btn-images')?.addEventListener('click', () => setActiveTab('images'));
-  document.getElementById('btn-video')?.addEventListener('click', () => setActiveTab('video'));
 
-  // accessibilità tastiera
-  ['btn-pdf','btn-images','btn-video'].forEach(id=>{
+  // Tastiera su bottoni
+  ['btn-pdf','btn-images'].forEach(id=>{
     const el = document.getElementById(id);
-    el?.addEventListener('keydown', (e)=>{
+    el?.addEventListener('keydown', e=>{
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
     });
+  });
+
+  // Cambi hash (back/forward)
+  window.addEventListener('hashchange', () => {
+    const h = (location.hash || '').replace('#','');
+    if (TABS.includes(h)) setActiveTab(h);
   });
 
   // =======================
@@ -49,11 +51,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clear-settings')?.addEventListener('click', () => localStorage.clear());
 
   // =======================
-  // LIBS & HELPERS GENERALI
+  // LIBS & HELPERS
   // =======================
   const { jsPDF } = window.jspdf || {};
   const pdfjsLib = window['pdfjs-dist/build/pdf'];
   if (pdfjsLib) {
+    // Worker per pdf.js
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }
@@ -65,11 +68,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
   });
   const saveBlob = (blob, name) => saveAs(blob, name);
-  const downloadDataUrl = (filename, dataUrl) => {
-    const a = document.createElement('a'); a.href = dataUrl; a.download = filename;
-    document.body.appendChild(a); a.click(); a.remove();
-  };
-  function loadImage(src){ return new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(img); img.onerror=rej; img.src=src; }); }
+
+  function loadImage(src){
+    return new Promise((res,rej)=>{
+      const img=new Image();
+      img.onload=()=>res(img);
+      img.onerror=()=>rej(new Error('Immagine non valida o CORS'));
+      img.src=src;
+    });
+  }
   function dataURLtoBlob(dataurl){
     const arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1];
     const bstr = atob(arr[1]); let n = bstr.length; const u8arr = new Uint8Array(n);
@@ -84,14 +91,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if(mime==='image/webp')return 'webp';
     return 'bin';
   }
-  function canvasPos(evt, canvas){
-    const r = canvas.getBoundingClientRect();
-    return { x: Math.round(evt.clientX - r.left), y: Math.round(evt.clientY - r.top) };
-  }
-  function dedupFiles(arr){ const map = new Map(); for(const f of arr){ map.set(`${f.name}_${f.size}`, f); } return [...map.values()]; }
+  const isImageFile = (f) => f && typeof f.type === 'string' && f.type.startsWith('image/');
 
   // =======================
-  // SEZIONE PDF
+  // ======= PDF ===========  (Split / Delete / PDF->IMG / IMG->PDF / Word->PDF / Excel->PDF)
   // =======================
   async function renderPdfSelectable(file, previewEl, state){
     previewEl.innerHTML = ""; state.selected = new Set(); state.canvases = [];
@@ -237,6 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const page = await pdf.getPage(p);
           const viewport = page.getViewport({ scale: scaleVal });
 
+          // evita canvas troppo grandi
           const maxCanvasPixels = 4096 * 4096;
           let width = viewport.width, height = viewport.height;
           if (width * height > maxCanvasPixels) {
@@ -278,7 +282,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     pdfDownloadAllBtn?.addEventListener('click', () => {
-      generatedImages.forEach(({name, dataUrl}) => downloadDataUrl(name, dataUrl));
+      generatedImages.forEach(({name, dataUrl}) => {
+        const a = document.createElement('a');
+        a.href = dataUrl; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      });
     });
     pdfClearBtn?.addEventListener('click', () => {
       generatedImages = []; pdfPreview.innerHTML = ""; pdfDownloadAllBtn.disabled = true;
@@ -301,6 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let doc=null;
       try{
         for(const file of files){
+          if (!isImageFile(file)) { img2pdfStatus.textContent="File non immagini ignorati."; continue; }
           const dataUrl = await readAsDataURL(file);
           const img = await loadImage(dataUrl);
           const w=img.naturalWidth, h=img.naturalHeight;
@@ -323,288 +331,254 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  // Conversioni PDF/Office (lite)
+  // Conversioni (SOLO Word->PDF e Excel->PDF)
   (function(){
-    const pdfAdvFile = document.getElementById('pdf-adv-file'); if(!pdfAdvFile || !pdfjsLib) return;
-    const pdf2word = document.getElementById('pdf2word-run');
-    const pdf2excelBtn = document.getElementById('pdf2excel-run');
-    const pdf2csvBtn = document.getElementById('pdf2csv-run');
-    const wordFile = document.getElementById('word-file');
-    const word2pdf = document.getElementById('word2pdf-run');
-    const excelFile = document.getElementById('excel-file');
-    const excel2pdf = document.getElementById('excel2pdf-run');
-    const advStatus = document.getElementById('advconv-status');
+    // WORD -> PDF
+    const wordFile   = document.getElementById('word-file');
+    const word2pdf   = document.getElementById('word2pdf-run');
+    const word2pdfDl = document.getElementById('word2pdf-dl');
+    const advStatus  = document.getElementById('advconv-status');
+    const hasWord = (wordFile && word2pdf && word2pdfDl && advStatus);
+    let lastWordPdfBlob=null;
 
-    const pdf2wordDl  = document.getElementById('pdf2word-dl');
-    const pdf2excelDl = document.getElementById('pdf2excel-dl');
-    const pdf2csvDl   = document.getElementById('pdf2csv-dl');
-    const word2pdfDl  = document.getElementById('word2pdf-dl');
-    const excel2pdfDl = document.getElementById('excel2pdf-dl');
+    if (hasWord) {
+      word2pdf.addEventListener('click', async () => {
+        try {
+          const f = wordFile.files?.[0]; if(!f){advStatus.textContent="Seleziona un file DOCX."; return;}
+          advStatus.textContent="Converto DOCX in PDF...";
+          const arrayBuffer = await f.arrayBuffer();
+          const result = await window.mammoth.convertToHtml({ arrayBuffer });
+          const html = result.value;
 
-    let lastDocxBlob=null, lastXlsxBlob=null, lastCsvBlob=null, lastWordPdfBlob=null, lastExcelPdfBlob=null;
+          const container = document.createElement('div');
+          container.style.position='fixed'; container.style.left='-9999px'; container.style.top='0'; container.style.width='794px'; // ~A4 in px @96dpi
+          container.innerHTML = html; document.body.appendChild(container);
 
-    pdf2word?.addEventListener('click', async () => {
-      try {
-        const f = pdfAdvFile.files?.[0];
-        if (!f) { advStatus.textContent = "Seleziona un PDF."; return; }
-        advStatus.textContent = "Estraggo testo dal PDF...";
+          const doc = new jsPDF({ unit:'pt', format:'a4' });
+          const pageWidth = doc.internal.pageSize.getWidth();
+          const pageHeight = doc.internal.pageSize.getHeight();
+          const canvas = await html2canvas(container, { scale: 2, useCORS: true, backgroundColor:'#ffffff' });
+          const imgData = canvas.toDataURL('image/png');
+          const imgW = pageWidth; const ratio = canvas.height / canvas.width; const imgH = imgW * ratio;
 
-        const ab = await (new Response(f)).arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
-
-        let paragraphs = [];
-        for (let p = 1; p <= pdf.numPages; p++) {
-          const page = await pdf.getPage(p);
-          const txt = await page.getTextContent();
-          const line = txt.items.map(i => i.str).join(" ");
-          paragraphs.push(`--- Pagina ${p} ---\n` + line);
-          advStatus.textContent = `Elaboro pagina ${p}/${pdf.numPages}...`;
-        }
-
-        const { Document, Packer, Paragraph } = window.docx;
-        const doc = new Document({ sections: [{ properties: {}, children: paragraphs.map(t => new Paragraph(t)) }] });
-        lastDocxBlob = await Packer.toBlob(doc);
-        saveBlob(lastDocxBlob, "converted.docx");
-        pdf2wordDl.disabled = false;
-        advStatus.textContent = "Fatto! Scaricato converted.docx (lite).";
-      } catch (e) { console.error(e); advStatus.textContent = "Errore PDF→DOCX."; }
-    });
-    pdf2wordDl?.addEventListener('click', ()=> lastDocxBlob ? saveBlob(lastDocxBlob, "converted.docx") : advStatus.textContent="Nessun DOCX in memoria.");
-
-    word2pdf?.addEventListener('click', async () => {
-      try {
-        const f = wordFile.files?.[0]; if(!f){advStatus.textContent="Seleziona un file DOCX."; return;}
-        advStatus.textContent="Converto DOCX in PDF...";
-        const arrayBuffer = await f.arrayBuffer();
-        const result = await window.mammoth.convertToHtml({ arrayBuffer });
-        const html = result.value;
-
-        const container = document.createElement('div');
-        container.style.position='fixed'; container.style.left='-9999px'; container.style.top='0'; container.style.width='794px';
-        container.innerHTML = html; document.body.appendChild(container);
-
-        const doc = new jsPDF({ unit:'pt', format:'a4' });
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const canvas = await html2canvas(container, { scale: 2, useCORS: true });
-        const imgData = canvas.toDataURL('image/png');
-        const imgW = pageWidth; const ratio = canvas.height / canvas.width; const imgH = imgW * ratio;
-
-        if (imgH <= pageHeight) doc.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
-        else{
-          let y=0, sliceHeight=Math.floor((pageHeight/imgH)*canvas.height), idx=0;
-          while(y<canvas.height){
-            const slice=document.createElement('canvas'); slice.width=canvas.width; slice.height=Math.min(sliceHeight, canvas.height-y);
-            slice.getContext('2d').drawImage(canvas,0,y,canvas.width,slice.height,0,0,slice.width,slice.height);
-            const sliceData=slice.toDataURL('image/png');
-            if(idx>0) doc.addPage();
-            const sliceRatio = slice.height / slice.width;
-            doc.addImage(sliceData,'PNG',0,0,pageWidth, pageWidth*sliceRatio);
-            y+=sliceHeight; idx++;
-          }
-        }
-        document.body.removeChild(container);
-        lastWordPdfBlob = doc.output('blob'); saveBlob(lastWordPdfBlob, 'converted.pdf'); word2pdfDl.disabled=false;
-        advStatus.textContent="Fatto! Scaricato converted.pdf";
-      } catch(e){ console.error(e); advStatus.textContent="Errore DOCX→PDF."; }
-    });
-    word2pdfDl?.addEventListener('click', ()=> lastWordPdfBlob ? saveBlob(lastWordPdfBlob,'converted.pdf') : advStatus.textContent="Nessun PDF in memoria.");
-
-    excel2pdf?.addEventListener('click', async () => {
-      try{
-        const f = excelFile.files?.[0]; if(!f){advStatus.textContent="Seleziona un file Excel (.xlsx)."; return;}
-        advStatus.textContent="Leggo Excel...";
-        const ab = await readAsArrayBuffer(f);
-        const wb = XLSX.read(ab, {type:'array'});
-        const sheetName = wb.SheetNames[0]; const ws = wb.Sheets[sheetName];
-        if(!ws){advStatus.textContent="Nessun foglio trovato nel file."; return;}
-        const html = XLSX.utils.sheet_to_html(ws, { header:"", footer:"" });
-
-        const container = document.createElement('div');
-        container.style.position='fixed'; container.style.left='-9999px'; container.style.top='0'; container.style.width='794px';
-        container.innerHTML = html; const table = container.querySelector('table');
-        if(table){ table.style.borderCollapse='collapse';
-          table.querySelectorAll('td,th').forEach(el=>{el.style.border='1px solid #999'; el.style.padding='4px 6px'; el.style.fontSize='12px';}); }
-        document.body.appendChild(container);
-
-        const doc = new jsPDF({ unit:'pt', format:'a4' });
-        const pageWidth = doc.internal.pageSize.getWidth(); const pageHeight = doc.internal.pageSize.getHeight();
-        const canvas = await html2canvas(container, { scale: 2, useCORS: true, backgroundColor:'#ffffff' });
-        const imgData = canvas.toDataURL('image/png'); const imgW = pageWidth; const ratio = canvas.height / canvas.width; const imgH = imgW * ratio;
-
-        if(imgH <= pageHeight) doc.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
-        else{
-          let y=0, sliceHeight=Math.floor((pageHeight/imgH)*canvas.height), idx=0;
-          while(y<canvas.height){
-            const slice=document.createElement('canvas'); slice.width=canvas.width; slice.height=Math.min(sliceHeight, canvas.height-y);
-            slice.getContext('2d').drawImage(canvas,0,y,canvas.width,slice.height,0,0,slice.width,slice.height);
-            const sliceData=slice.toDataURL('image/png');
-            if(idx>0) doc.addPage();
-            const sliceRatio=slice.height/slice.width;
-            doc.addImage(sliceData,'PNG',0,0,pageWidth,pageWidth*sliceRatio);
-            y+=sliceHeight; idx++;
-          }
-        }
-        document.body.removeChild(container);
-        lastExcelPdfBlob = doc.output('blob'); saveBlob(lastExcelPdfBlob, 'excel.pdf'); excel2pdfDl.disabled=false;
-        advStatus.textContent="Fatto! Scaricato excel.pdf";
-      }catch(e){ console.error(e); advStatus.textContent="Errore EXCEL→PDF."; }
-    });
-    excel2pdfDl?.addEventListener('click', ()=> lastExcelPdfBlob ? saveBlob(lastExcelPdfBlob,'excel.pdf') : advStatus.textContent="Nessun PDF in memoria.");
-
-    pdf2csvBtn?.addEventListener('click', ()=>pdfToTableLite('csv'));
-    pdf2excelBtn?.addEventListener('click', ()=>pdfToTableLite('xlsx'));
-
-    async function pdfToTableLite(mode){
-      try{
-        const f = pdfAdvFile.files?.[0]; if(!f){advStatus.textContent="Seleziona un PDF."; return;}
-        advStatus.textContent = `Analizzo il PDF per estrarre tabelle (${mode.toUpperCase()})...`;
-        const ab = await (new Response(f)).arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
-        const rowTol=3, colGap=12, minCols=2;
-        let table = [];
-
-        for(let p=1;p<=pdf.numPages;p++){
-          const page = await pdf.getPage(p);
-          const text = await page.getTextContent();
-          const items = text.items.map(it => {
-            const m=it.transform; return { str: it.str.trim(), x: m[4], y: m[5] };
-          }).filter(o=>o.str);
-          if(!items.length) continue;
-          items.sort((a,b)=> b.y - a.y || a.x - b.x);
-
-          const rows=[]; let current=[items[0]];
-          for(let i=1;i<items.length;i++){
-            const prev=current[current.length-1], it=items[i];
-            if(Math.abs(it.y-prev.y)<=rowTol) current.push(it);
-            else { rows.push(current); current=[it]; }
-          }
-          rows.push(current);
-
-          for(const r of rows){
-            r.sort((a,b)=> a.x - b.x);
-            const cells=[]; let buf=r[0].str;
-            for(let i=1;i<r.length;i++){
-              const prev=r[i-1], it=r[i];
-              const approxPrevW=prev.str.length*4;
-              const gap = it.x - (prev.x + approxPrevW);
-              if(gap>colGap){ cells.push(buf.trim()); buf=it.str; } else { buf+=(buf?' ':'')+it.str; }
+          if (imgH <= pageHeight) doc.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
+          else{
+            let y=0, sliceHeight=Math.floor((pageHeight/imgH)*canvas.height), idx=0;
+            while(y<canvas.height){
+              const slice=document.createElement('canvas'); slice.width=canvas.width; slice.height=Math.min(sliceHeight, canvas.height-y);
+              slice.getContext('2d').drawImage(canvas,0,y,canvas.width,slice.height,0,0,slice.width,slice.height);
+              const sliceData=slice.toDataURL('image/png');
+              if(idx>0) doc.addPage();
+              const sliceRatio = slice.height / slice.width;
+              doc.addImage(sliceData,'PNG',0,0,pageWidth, pageWidth*sliceRatio);
+              y+=sliceHeight; idx++;
             }
-            cells.push(buf.trim());
-            if(cells.filter(c=>c).length>=minCols) table.push(cells);
           }
-          advStatus.textContent = `Estraggo pagina ${p}/${pdf.numPages}...`;
-        }
+          document.body.removeChild(container);
+          lastWordPdfBlob = doc.output('blob'); saveBlob(lastWordPdfBlob, 'converted.pdf'); word2pdfDl.disabled=false;
+          advStatus.textContent="Fatto! Scaricato converted.pdf";
+        } catch(e){ console.error(e); advStatus.textContent="Errore DOCX→PDF."; }
+      });
+      word2pdfDl.addEventListener('click', ()=> lastWordPdfBlob ? saveBlob(lastWordPdfBlob,'converted.pdf') : advStatus.textContent="Nessun PDF in memoria.");
+    }
 
-        if(!table.length){ advStatus.textContent = "Nessuna tabella rilevata (per PDF complessi servono API)."; return; }
+    // EXCEL -> PDF
+    const excelFile   = document.getElementById('excel-file');
+    const excel2pdf   = document.getElementById('excel2pdf-run');
+    const excel2pdfDl = document.getElementById('excel2pdf-dl');
+    const hasExcel = (excelFile && excel2pdf && excel2pdfDl && advStatus);
+    let lastExcelPdfBlob=null;
 
-        if(mode==='csv'){
-          const maxCols = table.reduce((m, r)=> Math.max(m, r.length), 0);
-          const csv = table.map(r => {
-            const row=[...r]; while(row.length<maxCols) row.push('');
-            return row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',');
-          }).join('\n');
-          const blob = new Blob([csv], {type:'text/csv;charset=utf-8'}); saveBlob(blob, 'table.csv');
-          pdf2csvDl.disabled=false; advStatus.textContent="Fatto! Scaricato table.csv (lite).";
-        } else {
-          const maxCols = table.reduce((m, r)=> Math.max(m, r.length), 0);
-          const normalized = table.map(r => { const row=[...r]; while(row.length<maxCols) row.push(''); return row; });
-          const ws = XLSX.utils.aoa_to_sheet(normalized); const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'Estratto');
-          const arr = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-          const blob = new Blob([arr], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-          saveBlob(blob, 'table.xlsx'); pdf2excelDl.disabled=false; advStatus.textContent="Fatto! Scaricato table.xlsx (lite).";
-        }
-      }catch(e){ console.error(e); advStatus.textContent="Errore nell'estrazione tabelle (lite)."; }
+    if (hasExcel) {
+      excel2pdf.addEventListener('click', async () => {
+        try{
+          const f = excelFile.files?.[0]; if(!f){advStatus.textContent="Seleziona un file Excel (.xlsx)."; return;}
+          advStatus.textContent="Leggo Excel...";
+          const ab = await readAsArrayBuffer(f);
+          const wb = XLSX.read(ab, {type:'array'});
+          const sheetName = wb.SheetNames[0]; const ws = wb.Sheets[sheetName];
+          if(!ws){advStatus.textContent="Nessun foglio trovato nel file."; return;}
+          const html = XLSX.utils.sheet_to_html(ws, { header:"", footer:"" });
+
+          const container = document.createElement('div');
+          container.style.position='fixed'; container.style.left='-9999px'; container.style.top='0'; container.style.width='794px';
+          container.innerHTML = html; const table = container.querySelector('table');
+          if(table){ table.style.borderCollapse='collapse';
+            table.querySelectorAll('td,th').forEach(el=>{el.style.border='1px solid #999'; el.style.padding='4px 6px'; el.style.fontSize='12px';}); }
+          document.body.appendChild(container);
+
+          const doc = new jsPDF({ unit:'pt', format:'a4' });
+          const pageWidth = doc.internal.pageSize.getWidth(); const pageHeight = doc.internal.pageSize.getHeight();
+          const canvas = await html2canvas(container, { scale: 2, useCORS: true, backgroundColor:'#ffffff' });
+          const imgData = canvas.toDataURL('image/png'); const imgW = pageWidth; const ratio = canvas.height / canvas.width; const imgH = imgW * ratio;
+
+          if(imgH <= pageHeight) doc.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
+          else{
+            let y=0, sliceHeight=Math.floor((pageHeight/imgH)*canvas.height), idx=0;
+            while(y<canvas.height){
+              const slice=document.createElement('canvas'); slice.width=canvas.width; slice.height=Math.min(sliceHeight, canvas.height-y);
+              slice.getContext('2d').drawImage(canvas,0,y,canvas.width,slice.height,0,0,slice.width,slice.height);
+              const sliceData=slice.toDataURL('image/png');
+              if(idx>0) doc.addPage();
+              const sliceRatio=slice.height/slice.width;
+              doc.addImage(sliceData,'PNG',0,0,pageWidth,pageWidth*sliceRatio);
+              y+=sliceHeight; idx++;
+            }
+          }
+          document.body.removeChild(container);
+          lastExcelPdfBlob = doc.output('blob'); saveBlob(lastExcelPdfBlob, 'excel.pdf'); excel2pdfDl.disabled=false;
+          advStatus.textContent="Fatto! Scaricato excel.pdf";
+        }catch(e){ console.error(e); advStatus.textContent="Errore EXCEL→PDF."; }
+      });
+      excel2pdfDl.addEventListener('click', ()=> lastExcelPdfBlob ? saveBlob(lastExcelPdfBlob,'excel.pdf') : advStatus.textContent="Nessun PDF in memoria.");
     }
   })();
 
   // =======================
-  // SEZIONE IMMAGINI
+  // ======= IMMAGINI ======
   // =======================
 
-  // Comprimi (JPEG/PNG/WEBP)
+  // Comprimi (mantieni formato input) — slider qualità con percentuale
   (function(){
     const cmpFile = document.getElementById('cmp-file'); if(!cmpFile) return;
-    const cmpFormat = document.getElementById('cmp-format');
     const cmpQuality = document.getElementById('cmp-quality');
+    const cmpQualityVal = document.getElementById('cmp-quality-val');
     const cmpRun = document.getElementById('cmp-run');
     const cmpDl = document.getElementById('cmp-dl');
     const cmpStatus = document.getElementById('cmp-status');
     const cmpPreview = document.getElementById('cmp-preview');
-    let cmpBlob = null;
+    let cmpBlob = null, outExt = 'png';
+
+    const updateQ = () => { if(cmpQualityVal) cmpQualityVal.textContent = `${Math.round(parseFloat(cmpQuality.value||"0")*100)}%`; };
+    cmpQuality?.addEventListener('input', updateQ); updateQ();
+
+    function resetCmp(){
+      cmpBlob=null; cmpDl.disabled=true; cmpPreview.innerHTML=''; cmpStatus.textContent='';
+    }
+
+    cmpFile.addEventListener('change', ()=> {
+      const f = cmpFile.files?.[0];
+      resetCmp();
+      if(!f){ return; }
+      if(!isImageFile(f)){
+        cmpStatus.textContent = "Il file selezionato non è un'immagine. Seleziona PNG/JPEG/WEBP.";
+        cmpFile.value = '';
+        return;
+      }
+      cmpStatus.textContent = `File caricato: ${f.name}`;
+    });
 
     cmpRun?.addEventListener('click', async () => {
       try{
-        const f = cmpFile.files?.[0]; if(!f){cmpStatus.textContent="Seleziona un'immagine."; return;}
+        const f = cmpFile.files?.[0];
+        if(!f){cmpStatus.textContent="Seleziona un'immagine."; return;}
+        if(!isImageFile(f)){ cmpStatus.textContent="Il file non è un'immagine."; return; }
+
         cmpStatus.textContent="Comprimo...";
         const url = await readAsDataURL(f);
         const img = await loadImage(url);
         const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
         canvas.getContext('2d').drawImage(img,0,0);
-        const mime = (cmpFormat?.value)||'image/jpeg';
-        const quality = parseFloat(cmpQuality?.value||"0.8");
-        const dataUrl = canvas.toDataURL(mime, mime==='image/png' ? undefined : quality);
+
+        const mimeIn = f.type || 'image/png';
+        const lossy = (mimeIn === 'image/jpeg' || mimeIn === 'image/webp');
+        const q = parseFloat(cmpQuality?.value||"0.8");
+        const dataUrl = canvas.toDataURL(mimeIn, lossy ? q : undefined);
+
         cmpBlob = dataURLtoBlob(dataUrl);
+        outExt = mimeExt(mimeIn);
+
         cmpDl.disabled = false;
         cmpPreview.innerHTML = "";
         const wrap = document.createElement('div'); wrap.className='thumb';
         const im = document.createElement('img'); im.src = dataUrl; wrap.appendChild(im);
         cmpPreview.appendChild(wrap);
-        cmpStatus.textContent="Fatto. Usa Scarica per salvare.";
+        cmpStatus.textContent=`Fatto. Formato mantenuto.`;
       }catch(e){ console.error(e); cmpStatus.textContent="Errore in compressione."; }
     });
-    cmpDl?.addEventListener('click', ()=> { if(cmpBlob){ saveBlob(cmpBlob, suggestName(cmpFile.files[0].name, mimeExt((cmpFormat?.value)||'image/jpeg'))); } });
+
+    cmpDl?.addEventListener('click', ()=> {
+      const f = cmpFile.files?.[0]; if(!cmpBlob || !f) return;
+      saveBlob(cmpBlob, suggestName(f.name, outExt));
+    });
   })();
 
-  // Ridimensiona (pica)
+  // Ridimensiona (mantieni formato input + pica) — proporzioni sincronizzate
   (function(){
     const rszFile = document.getElementById('rsz-file'); if(!rszFile) return;
     const rszW = document.getElementById('rsz-w');
     const rszH = document.getElementById('rsz-h');
     const rszKeep = document.getElementById('rsz-keep');
-    const rszFormat = document.getElementById('rsz-format');
-    const rszQuality = document.getElementById('rsz-quality');
     const rszRun = document.getElementById('rsz-run');
     const rszDl = document.getElementById('rsz-dl');
     const rszStatus = document.getElementById('rsz-status');
     const rszPreview = document.getElementById('rsz-preview');
-    let rszBlob=null;
+
+    let rszBlob=null, outExt='png';
+    let natW=null, natH=null;
+    let syncing=false;
+
+    function resetRsz(msg){
+      rszBlob=null; rszDl.disabled=true; rszPreview.innerHTML=''; rszStatus.textContent = msg || '';
+      natW = natH = null;
+    }
 
     rszFile.addEventListener('change', async ()=>{
-      const f = rszFile.files?.[0]; if(!f) return;
+      const f = rszFile.files?.[0];
+      resetRsz('');
+      if(!f) return;
+      if(!isImageFile(f)){
+        rszStatus.textContent = "Il file selezionato non è un'immagine. Seleziona PNG/JPEG/WEBP.";
+        rszFile.value='';
+        return;
+      }
       const url = await readAsDataURL(f);
       const img = await loadImage(url);
-      if(rszKeep.checked){
-        const targetW = parseInt(rszW.value||"0",10)||img.naturalWidth;
-        const ratio = img.naturalHeight/img.naturalWidth;
-        rszH.value = Math.round(targetW * ratio);
-      }
+      natW = img.naturalWidth; natH = img.naturalHeight;
+
+      if(!Number(rszW.value)) rszW.value = String(natW);
+      if(!Number(rszH.value)) rszH.value = String(natH);
+
+      rszStatus.textContent = `Immagine: ${natW}×${natH}px`;
     });
 
+    // Sincronia bidirezionale con "Mantieni proporzioni"
     rszW?.addEventListener('input', ()=>{
-      const f = rszFile.files?.[0]; if(!f) return;
-      if(rszKeep.checked){
-        readAsDataURL(f).then(loadImage).then(img=>{
-          const targetW = parseInt(rszW.value||"0",10)||img.naturalWidth;
-          const ratio = img.naturalHeight/img.naturalWidth;
-          rszH.value = Math.round(targetW * ratio);
-        });
-      }
+      if(!rszKeep.checked || !natW || !natH) return;
+      if(syncing) return;
+      syncing = true;
+      const w = Math.max(1, parseInt(rszW.value||"0",10));
+      const h = Math.round(w * (natH / natW));
+      rszH.value = String(h);
+      syncing = false;
+    });
+    rszH?.addEventListener('input', ()=>{
+      if(!rszKeep.checked || !natW || !natH) return;
+      if(syncing) return;
+      syncing = true;
+      const h = Math.max(1, parseInt(rszH.value||"0",10));
+      const w = Math.round(h * (natW / natH));
+      rszW.value = String(w);
+      syncing = false;
     });
 
     rszRun?.addEventListener('click', async ()=>{
       try{
-        const f = rszFile.files?.[0]; if(!f){rszStatus.textContent="Seleziona un'immagine."; return;}
+        const f = rszFile.files?.[0];
+        if(!f){ rszStatus.textContent="Seleziona un'immagine."; return; }
+        if(!isImageFile(f)){ rszStatus.textContent="Il file non è un'immagine."; return; }
+        if(!natW || !natH){ rszStatus.textContent="Carica prima l'immagine."; return; }
+
         const url = await readAsDataURL(f);
         const img = await loadImage(url);
 
-        let tw = parseInt(rszW.value||"0",10) || img.naturalWidth;
-        let th = parseInt(rszH.value||"0",10) || img.naturalHeight;
+        let tw = Math.max(1, parseInt(rszW.value||"0",10));
+        let th = Math.max(1, parseInt(rszH.value||"0",10));
         if(rszKeep.checked){
-          const ratio = img.naturalHeight/img.naturalWidth;
-          th = Math.round(tw*ratio);
+          const ratio = natH/natW;
+          th = Math.max(1, Math.round(tw*ratio));
+          rszH.value = String(th);
         }
 
         const src = document.createElement('canvas');
@@ -617,10 +591,10 @@ document.addEventListener('DOMContentLoaded', () => {
         rszStatus.textContent="Ridimensiono...";
         await window.pica().resize(src, dst, { quality: 3 });
 
-        const mime = rszFormat.value;
-        const quality = parseFloat(rszQuality.value||"0.9");
-        const dataUrl = dst.toDataURL(mime, (mime==='image/png') ? undefined : quality);
+        const mimeIn = f.type || 'image/png';
+        const dataUrl = dst.toDataURL(mimeIn);
         rszBlob = dataURLtoBlob(dataUrl);
+        outExt = mimeExt(mimeIn);
 
         rszPreview.innerHTML="";
         const wrap=document.createElement('div'); wrap.className='thumb';
@@ -628,24 +602,40 @@ document.addEventListener('DOMContentLoaded', () => {
         rszPreview.appendChild(wrap);
 
         rszDl.disabled=false;
-        rszStatus.textContent="Fatto. Usa Scarica per salvare.";
+        rszStatus.textContent=`Fatto. ${tw}×${th}px (formato mantenuto).`;
       }catch(e){ console.error(e); rszStatus.textContent="Errore nel ridimensionamento."; }
     });
-    rszDl?.addEventListener('click', ()=> { if(rszBlob){ saveBlob(rszBlob, suggestName(rszFile.files[0].name, mimeExt(rszFormat.value))); } });
+
+    rszDl?.addEventListener('click', ()=>{
+      const f = rszFile.files?.[0]; if(!rszBlob || !f) return;
+      saveBlob(rszBlob, suggestName(f.name, outExt));
+    });
   })();
 
-  // Dropzone helper (immagini)
-  function setupDropzone(dropEl, inputEl, state, previewEl){
+  // Dropzone helper (con limite opzionale)
+  function setupDropzone(dropEl, inputEl, state, previewEl, statusEl, maxFiles=null){
     const highlight = (on)=> dropEl.classList.toggle('highlight', !!on);
     ['dragenter','dragover'].forEach(ev => dropEl.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); highlight(true); }));
     ['dragleave','drop'].forEach(ev => dropEl.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); highlight(false); }));
     dropEl.addEventListener('drop', e=>{
-      const files = Array.from(e.dataTransfer.files||[]).filter(f=>f.type.startsWith('image/'));
-      if(files.length){ state.files = dedupFiles([...(state.files||[]), ...files]); updatePreview(); }
+      const inc = Array.from(e.dataTransfer.files||[]).filter(isImageFile);
+      if(!inc.length){ statusEl && (statusEl.textContent="Trascina solo immagini."); return; }
+      state.files = dedupFiles([...(state.files||[]), ...inc]);
+      if(maxFiles && state.files.length > maxFiles){
+        state.files = state.files.slice(0, maxFiles);
+        statusEl && (statusEl.textContent=`Puoi usare al massimo ${maxFiles} immagini; tengo le prime ${maxFiles}.`);
+      }
+      updatePreview();
     });
     inputEl.addEventListener('change', ()=>{
-      const files = Array.from(inputEl.files||[]).filter(f=>f.type.startsWith('image/'));
-      state.files = dedupFiles([...(state.files||[]), ...files]); updatePreview();
+      const inc = Array.from(inputEl.files||[]).filter(isImageFile);
+      if(!inc.length){ statusEl && (statusEl.textContent="Seleziona immagini valide."); return; }
+      state.files = dedupFiles([...(state.files||[]), ...inc]);
+      if(maxFiles && state.files.length > maxFiles){
+        state.files = state.files.slice(0, maxFiles);
+        statusEl && (statusEl.textContent=`Puoi usare al massimo ${maxFiles} immagini; tengo le prime ${maxFiles}.`);
+      } else { statusEl && (statusEl.textContent = `${state.files.length} immagine/i in coda`); }
+      updatePreview();
     });
     function updatePreview(){
       previewEl.innerHTML = '';
@@ -657,9 +647,11 @@ document.addEventListener('DOMContentLoaded', () => {
         wrap.appendChild(img); wrap.appendChild(tag); previewEl.appendChild(wrap);
       });
     }
+    function dedupFiles(arr){ const map = new Map(); for(const f of arr){ map.set(`${f.name}_${f.size}`, f); } return [...map.values()]; }
+    state._updatePreview = updatePreview;
   }
 
-  // Combina immagini
+  // Combina immagini (max 2)
   (function(){
     const drop = document.getElementById('cmb-drop'); const input = document.getElementById('cmb-files'); if(!drop || !input) return;
     const preview = document.getElementById('cmb-preview');
@@ -672,22 +664,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('cmb-canvas');
     const ctx = canvas.getContext('2d');
     const state = { files: [] };
-    setupDropzone(drop, input, state, preview);
+    setupDropzone(drop, input, state, preview, status, 2);
     let outBlob = null;
 
     run.addEventListener('click', async ()=>{
       try{
-        const files = state.files.length ? state.files : Array.from(input.files||[]);
-        if(!files.length){ status.textContent="Seleziona 2 o più immagini."; return; }
+        const files = state.files.length ? state.files : Array.from(input.files||[]).filter(isImageFile).slice(0,2);
+        if(files.length < 2){ status.textContent="Seleziona esattamente 2 immagini."; return; }
+        if(files.length > 2){ status.textContent="Massimo 2 immagini."; return; }
+
         const imgs = await Promise.all(files.map(f => readAsDataURL(f).then(loadImage)));
-        const gap = parseInt(gapEl.value||"0",10);
+        const gap = Math.max(0, parseInt(gapEl.value||"0",10));
         const bg = bgEl.value;
 
         if(layout.value === 'horizontal'){
-          const totalW = imgs.reduce((s,i)=>s+i.naturalWidth, 0) + gap*(imgs.length-1);
-          const maxH = Math.max(...imgs.map(i=>i.naturalHeight));
+          const totalW = imgs[0].naturalWidth + imgs[1].naturalWidth + gap;
+          const maxH = Math.max(imgs[0].naturalHeight, imgs[1].naturalHeight);
           canvas.width = totalW; canvas.height = maxH;
           ctx.fillStyle=bg; ctx.fillRect(0,0,totalW,maxH);
+
           let x=0;
           for(const im of imgs){
             const y = (maxH - im.naturalHeight)/2;
@@ -695,10 +690,11 @@ document.addEventListener('DOMContentLoaded', () => {
             x += im.naturalWidth + gap;
           }
         } else {
-          const totalH = imgs.reduce((s,i)=>s+i.naturalHeight, 0) + gap*(imgs.length-1);
-          const maxW = Math.max(...imgs.map(i=>i.naturalWidth));
+          const totalH = imgs[0].naturalHeight + imgs[1].naturalHeight + gap;
+          const maxW = Math.max(imgs[0].naturalWidth, imgs[1].naturalWidth);
           canvas.width = maxW; canvas.height = totalH;
           ctx.fillStyle=bg; ctx.fillRect(0,0,maxW,totalH);
+
           let y=0;
           for(const im of imgs){
             const x = (maxW - im.naturalWidth)/2;
@@ -725,6 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const wEl    = document.getElementById('clg-w');
     const hEl    = document.getElementById('clg-h');
     const bgEl   = document.getElementById('clg-bg');
+    theFit       = document.getElementById('clg-fit'); // (scope locale)
     const fitEl  = document.getElementById('clg-fit');
     const run    = document.getElementById('clg-run');
     const dl     = document.getElementById('clg-dl');
@@ -732,12 +729,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('clg-canvas');
     const ctx    = canvas.getContext('2d');
     const state  = { files: [] };
-    setupDropzone(drop, input, state, preview);
+    setupDropzone(drop, input, state, preview, status);
     let outBlob=null;
 
     run.addEventListener('click', async ()=>{
       try{
-        const files = state.files.length ? state.files : Array.from(input.files||[]);
+        const files = state.files.length ? state.files : Array.from(input.files||[]).filter(isImageFile);
         if(!files.length){status.textContent="Seleziona immagini."; return;}
         const rows = Math.max(1, parseInt(rowsEl.value||"2",10));
         const cols = Math.max(1, parseInt(colsEl.value||"2",10));
@@ -791,7 +788,7 @@ document.addEventListener('DOMContentLoaded', () => {
     dl.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, 'collage.png'); });
   })();
 
-  // Conversioni formato immagine (pannelli orizzontali con anteprima)
+  // Conversioni formato (tiles)
   (function(){
     document.querySelectorAll('#section-images .tile').forEach(tile=>{
       const input  = tile.querySelector('input[type="file"][data-from]');
@@ -804,395 +801,166 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let outBlob=null, outName='converted';
 
-      // Anteprima originale
       input.addEventListener('change', async ()=>{
         const f = input.files?.[0];
-        if(!f){ if(inPrev) inPrev.removeAttribute('src'); if(outPrev) outPrev.removeAttribute('src'); btnDl && (btnDl.disabled=true); status && (status.textContent=''); return; }
+        outBlob=null; if(btnDl) btnDl.disabled=true; if(status) status.textContent='';
+        outPrev?.removeAttribute('src'); inPrev?.removeAttribute('src');
+        if(!f){ return; }
+        if(!isImageFile(f)){
+          status && (status.textContent="Seleziona un file immagine valido.");
+          input.value = '';
+          return;
+        }
         const url = await readAsDataURL(f);
-        if(inPrev){ inPrev.src = url; }
-        // reset risultato
-        outBlob=null; btnDl && (btnDl.disabled=true); status && (status.textContent='');
-        if(outPrev) outPrev.removeAttribute('src');
+        if(inPrev) inPrev.src = url;
       });
 
       btnRun.addEventListener('click', async ()=>{
         try{
           const f = input.files?.[0];
           if(!f){ status && (status.textContent="Seleziona un file."); return; }
+          if(!isImageFile(f)){ status && (status.textContent="Il file non è un'immagine."); return; }
           status && (status.textContent="Converto...");
-          const url  = await readAsDataURL(f);
-          const img  = await loadImage(url);
+
+          const url = await readAsDataURL(f);
+          const img = await loadImage(url);
+
           const can  = document.createElement('canvas'); can.width=img.naturalWidth; can.height=img.naturalHeight;
           can.getContext('2d').drawImage(img,0,0);
+
           const mimeTo = input.dataset.to;
-          const extTo  = mimeExt(mimeTo);
+          const extTo  = (mimeTo==='image/jpeg'?'jpg': mimeTo==='image/png'?'png': mimeTo==='image/webp'?'webp':'bin');
           const dataUrl = can.toDataURL(mimeTo, mimeTo==='image/png' ? undefined : 0.92);
-          outBlob = dataURLtoBlob(dataUrl);
-          outName = suggestName(f.name, extTo);
-          if(outPrev){ outPrev.src = dataUrl; }
-          btnDl && (btnDl.disabled=false);
-          status && (status.textContent="Fatto. Scarica per salvare.");
-        }catch(e){ console.error(e); status && (status.textContent="Errore nella conversione."); }
-      });
 
-      btnDl?.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, outName); });
-    });
-  })();
+          const arr = dataUrl.split(','), mime = arr[0].match(/:(.*?);/)[1];
+          const bstr = atob(arr[1]); const u8 = new Uint8Array(bstr.length);
+          for(let i=0;i<bstr.length;i++) u8[i]=bstr.charCodeAt(i);
+          outBlob = new Blob([u8], { type:mime });
 
-  // =======================
-  // SEZIONE VIDEO (ffmpeg.wasm)
-  // =======================
+          outName = (f.name || 'file').replace(/\.[^.]+$/, `.${extTo}`);
 
-  // Avvisi utili
-  if (location.protocol === 'file:') {
-    console.warn('[ffmpeg] Stai aprendo la pagina via file:// — usa un piccolo server locale (es. VSCode Live Server o python -m http.server) per evitare problemi di CORS con il core WASM.');
-  }
-
-  // Individua namespace UMD (diversi bundle espongono nomi diversi)
-  const FFClass =
-    (window.FFmpegWASM && window.FFmpegWASM.FFmpeg) ||
-    (window.FFmpeg && window.FFmpeg.FFmpeg) ||
-    window.FFmpeg;
-
-  // Util dalla UMD @ffmpeg/util (se presente); altrimenti fallback compatibili
-  const UtilNS = window.FFmpegUtil || {};
-  const fetchFileFF = UtilNS.fetchFile || (async (src) => {
-    if (src instanceof Blob) return new Uint8Array(await src.arrayBuffer());
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`fetch ${src} -> ${res.status}`);
-    return new Uint8Array(await res.arrayBuffer());
-  });
-  const toBlobURLFF = UtilNS.toBlobURL || (async (url, mime) => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
-    const buf = await res.arrayBuffer();
-    return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
-  });
-
-  // progress bar helper e Blob utility
-  function makeProgressUpdater(container){
-    if(!container) return ()=>{};
-    const bar = container.querySelector('div') || container.appendChild(document.createElement('div'));
-    return (ratio)=>{ bar.style.width = `${Math.min(100, Math.round((ratio||0)*100))}%`; };
-  }
-  const u8ToBlob = (u8, mime) => new Blob([u8], { type: mime || 'application/octet-stream' });
-
-  // Loader FFmpeg robusto (usa sempre toBlobURL per evitare CORS)
-  let ffmpeg = null, ffLoaded = false;
-  // === Loader FFmpeg con CORS-safe (Blob URL) e patch per 814.ffmpeg.js ===
-async function getFF(updateCb, statusEl){
-  // 1) Classe esposta dalle UMD già importate nel <head>
-  const FFClass =
-    (window.FFmpeg && window.FFmpeg.FFmpeg) ||
-    window.FFmpeg ||
-    (window.FFmpegWASM && window.FFmpegWASM.FFmpeg);
-
-  if (!FFClass) {
-    const msg = 'FFmpeg UMD non trovata: assicurati che @ffmpeg/ffmpeg e @ffmpeg/util siano PRIMA di script.js.';
-    statusEl && (statusEl.textContent = msg);
-    throw new Error(msg);
-  }
-
-  // 2) Riuso se già caricato
-  if (ffmpeg && ffLoaded) {
-    try { ffmpeg.off?.('progress'); } catch {}
-    ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
-    return ffmpeg;
-  }
-
-  // 3) Instanzia + log/progress
-  ffmpeg = new FFClass();
-  ffmpeg.on?.('log',      ({ message }) => console.log('[ffmpeg]', message));
-  ffmpeg.on?.('progress', ({ progress }) => updateCb && updateCb(progress || 0));
-
-  // 4) toBlobURL (se @ffmpeg/util non fosse disponibile)
-  const UtilNS = window.FFmpegUtil || {};
-  const toBlobURLFF = UtilNS.toBlobURL || (async (url, mime) => {
-    const res = await fetch(url, { mode: 'cors' });
-    if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
-    const buf = await res.arrayBuffer();
-    return URL.createObjectURL(new Blob([buf], { type: mime || 'application/octet-stream' }));
-  });
-
-  // 5) Patch per il "class worker" 814.ffmpeg.js → usiamo l’ESM worker via Blob (same-origin)
-  const classWorkerURL = await toBlobURLFF(
-    'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
-    'text/javascript'
-  );
-  const NativeWorker = window.Worker;
-  window.Worker = function(spec, opts){
-    try{
-      const href = (spec && spec.href) ? spec.href : String(spec || '');
-      if (href.includes('814.ffmpeg.js')) {
-        const o = Object.assign({}, opts, { type: 'module' });
-        return new NativeWorker(classWorkerURL, o);
-      }
-    }catch(_){}
-    return new NativeWorker(spec, opts);
-  };
-
-  // 6) Carica SOLO @ffmpeg/core (multithread), dalla cartella /dist (NON /umd)
-  const CORE_VER = '0.12.10'; // testata e stabile
-  const BASE     = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VER}/dist`;
-  try {
-    statusEl && (statusEl.textContent = 'Carico FFmpeg core…');
-    const coreURL   = await toBlobURLFF(`${BASE}/ffmpeg-core.js`,        'text/javascript');
-    const wasmURL   = await toBlobURLFF(`${BASE}/ffmpeg-core.wasm`,      'application/wasm');
-    const workerURL = await toBlobURLFF(`${BASE}/ffmpeg-core.worker.js`, 'text/javascript');
-    await ffmpeg.load({ coreURL, wasmURL, workerURL });
-    ffLoaded = true;
-    return ffmpeg;
-  } catch (e) {
-    console.error('[ffmpeg] load error', e);
-    const msg = 'Impossibile caricare ffmpeg-core (vedi console).';
-    statusEl && (statusEl.textContent = msg);
-    throw new Error(msg);
-  } finally {
-    // 7) Ripristina il Worker nativo per non toccare altri componenti della pagina
-    window.Worker = NativeWorker;
-  }
-}
-  // Esegue args con fallback (prova più varianti finché una passa)
-  async function execWithFallback(ff, variants){
-    let lastErr=null;
-    for(const v of variants){
-      try{ await ff.exec(v.args); return v; }
-      catch(e){ lastErr = e; console.warn('[ffmpeg] variante fallita', v.args, e); }
-    }
-    throw lastErr || new Error('Tutte le varianti sono fallite');
-  }
-
-  // ====== COMPRIMI ======
-  (function(){
-    const inEl = document.getElementById('vid-comp-file'); if(!inEl) return;
-    const crfEl = document.getElementById('vid-comp-crf');
-    const presetEl = document.getElementById('vid-comp-preset');
-    const audioEl = document.getElementById('vid-comp-audio');
-    const runEl = document.getElementById('vid-comp-run');
-    const dlEl = document.getElementById('vid-comp-dl');
-    const status = document.getElementById('vid-comp-status');
-    const progress = document.getElementById('vid-comp-progress');
-
-    let outBlob=null, outName='compressed';
-
-    runEl.addEventListener('click', async ()=>{
-      try{
-        const f = inEl.files?.[0]; if(!f){ status.textContent="Seleziona un video."; return; }
-        const update = makeProgressUpdater(progress);
-        status.textContent="Inizializzo FFmpeg...";
-        const ff = await getFF(update, status);
-
-        const extIn = (f.name.split('.').pop()||'mp4').toLowerCase();
-        const inputName = `in.${extIn}`;
-        await ff.writeFile(inputName, await fetchFileFF(f));
-
-        const wantWebM = (audioEl?.value === 'opus');
-        const outFS = wantWebM ? 'out.webm' : 'out.mp4';
-        outName = f.name.replace(/\.[^.]+$/, wantWebM ? '.webm' : '.mp4');
-
-        const crf    = Math.max(18, Math.min(40, parseInt(crfEl?.value||'26',10)));
-        const preset = (presetEl?.value||'medium');
-
-        status.textContent="Comprimo...";
-        const variants = wantWebM
-          ? [
-              { args: ['-i', inputName, '-c:v','libvpx-vp9','-b:v','0','-crf', String(crf), '-row-mt','1', '-c:a','libopus','-b:a','128k', outFS] },
-              { args: ['-i', inputName, '-c:v','libvpx',      '-q:v','6',                  '-c:a','libvorbis','-b:a','128k', outFS] },
-              { args: ['-i', inputName, outFS] },
-            ]
-          : [
-              { args: ['-i', inputName, '-c:v','libx264','-crf', String(crf), '-preset', preset, '-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-              { args: ['-i', inputName, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-              { args: ['-i', inputName, outFS] },
-            ];
-
-        await execWithFallback(ff, variants);
-        status.textContent="Leggo output...";
-        const data = await ff.readFile(outFS);
-        outBlob = u8ToBlob(data, wantWebM? 'video/webm' : 'video/mp4');
-        dlEl.disabled = false;
-        status.textContent = "Fatto. Scarica per salvare.";
-        update(1);
-      }catch(e){
-        console.error(e);
-        status.textContent = `Errore: ${e?.message || e}. Apri la console per i dettagli.`;
-      }
-    });
-
-    dlEl.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, outName); });
-  })();
-
-  // ====== RIDIMENSIONA ======
-  (function(){
-    const inEl = document.getElementById('vid-resize-file'); if(!inEl) return;
-    const wEl = document.getElementById('vid-resize-w');
-    const crfEl = document.getElementById('vid-resize-crf');
-    const presetEl = document.getElementById('vid-resize-preset');
-    const runEl = document.getElementById('vid-resize-run');
-    const dlEl = document.getElementById('vid-resize-dl');
-    const status = document.getElementById('vid-resize-status');
-    const progress = document.getElementById('vid-resize-progress');
-
-    let outBlob=null, outName='resized.mp4';
-
-    runEl.addEventListener('click', async ()=>{
-      try{
-        const f = inEl.files?.[0]; if(!f){ status.textContent="Seleziona un video."; return; }
-        const width = Math.max(160, parseInt(wEl?.value||'1280',10));
-        const crf = Math.max(18, Math.min(40, parseInt(crfEl?.value||'26',10)));
-        const update = makeProgressUpdater(progress);
-
-        status.textContent="Inizializzo FFmpeg...";
-        const ff = await getFF(update, status);
-
-        const extIn = (f.name.split('.').pop()||'mp4').toLowerCase();
-        const inFS = `in.${extIn}`;
-        await ff.writeFile(inFS, await fetchFileFF(f));
-        const outFS = 'out.mp4';
-        outName = f.name.replace(/\.[^.]+$/, '.mp4');
-
-        status.textContent="Ridimensiono...";
-        const variants = [
-          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, '-c:v','libx264','-crf', String(crf), '-preset', (presetEl?.value||'medium'),
-                   '-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-          { args: ['-i', inFS, '-vf', `scale=${width}:-2`, outFS] },
-        ];
-        await execWithFallback(ff, variants);
-
-        status.textContent="Leggo output...";
-        const data = await ff.readFile(outFS);
-        outBlob = u8ToBlob(data, 'video/mp4');
-        dlEl.disabled=false;
-        status.textContent="Fatto. Scarica per salvare.";
-        update(1);
-      }catch(e){
-        console.error(e);
-        status.textContent = `Errore: ${e?.message || e}. Vedi console.`;
-      }
-    });
-
-    dlEl.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, outName); });
-  })();
-
-  // ====== CONVERSIONI (MP4/MOV/WEBM/MP3) ======
-  (function(){
-    document.querySelectorAll('#section-video .tile').forEach(tile=>{
-      const input = tile.querySelector('input[type="file"][data-vconv-from]');
-      const btnRun = tile.querySelector('[data-vconv-run]');
-      const btnDl  = tile.querySelector('[data-vconv-dl]');
-      const prog   = tile.querySelector('[data-vconv-progress]');
-      const status = tile.querySelector('[data-vconv-status]');
-      const vIn    = tile.querySelector('[data-vin-preview]');
-      const vOut   = tile.querySelector('[data-vout-video]');
-      const aOut   = tile.querySelector('[data-vout-audio]');
-      if(!input || !btnRun) return;
-
-      const to = (input.dataset.vconvTo||'mp4').toLowerCase();
-      let outBlob=null, outName='output', inURL=null, outURL=null;
-
-      function setProgress(r){
-        if(!prog) return; const bar = prog.querySelector('div') || prog.appendChild(document.createElement('div'));
-        bar.style.width = `${Math.min(100, Math.round((r||0)*100))}%`;
-      }
-
-      input.addEventListener('change', ()=>{
-        if(inURL){ URL.revokeObjectURL(inURL); inURL=null; }
-        if(outURL){ URL.revokeObjectURL(outURL); outURL=null; }
-        outBlob=null; btnDl && (btnDl.disabled=true); status && (status.textContent='');
-        if(vOut) vOut.removeAttribute('src'); if(aOut) aOut.removeAttribute('src');
-        const f = input.files?.[0]; if(!f || !vIn) return;
-        inURL = URL.createObjectURL(f); vIn.src = inURL; vIn.load();
-      });
-
-      btnRun.addEventListener('click', async ()=>{
-        try{
-          const f = input.files?.[0]; if(!f){ status && (status.textContent="Seleziona un file."); return; }
-          status && (status.textContent="Inizializzo FFmpeg...");
-          setProgress(0);
-          const ff = await getFF(setProgress, status);
-
-          const extIn = (f.name.split('.').pop()||'mp4').toLowerCase();
-          const inFS = `in.${extIn}`;
-          await ff.writeFile(inFS, await fetchFileFF(f));
-
-          let outFS = `out.${to}`;
-          let mime = (to==='mp4') ? 'video/mp4'
-                   : (to==='mov') ? 'video/quicktime'
-                   : (to==='webm')? 'video/webm'
-                   : (to==='mp3') ? 'audio/mpeg'
-                   : 'application/octet-stream';
-          let variants = [], displayAsAudio = false;
-
-          if (to === 'mp3') {
-            outFS = 'out.mp3'; outName = f.name.replace(/\.[^.]+$/, '.mp3'); displayAsAudio = true;
-            variants = [
-              { args: ['-i', inFS, '-vn', '-c:a','libmp3lame','-b:a','192k', outFS] },
-              { args: ['-i', inFS, '-vn', '-c:a','aac','-b:a','192k', 'out.m4a'] }, // fallback
-            ];
-          } else if (to === 'webm') {
-            outName = f.name.replace(/\.[^.]+$/, '.webm');
-            variants = [
-              { args: ['-i', inFS, '-c:v','libvpx-vp9','-b:v','0','-crf','28','-row-mt','1', '-c:a','libopus','-b:a','128k', outFS] },
-              { args: ['-i', inFS, '-c:v','libvpx',      '-q:v','6',                 '-c:a','libvorbis','-b:a','128k', outFS] },
-              { args: ['-i', inFS, outFS] },
-            ];
-          } else if (to === 'mov') {
-            outName = f.name.replace(/\.[^.]+$/, '.mov');
-            variants = [
-              { args: ['-i', inFS, '-c:v','libx264','-crf','23','-preset','medium','-c:a','aac','-b:a','128k', outFS] },
-              { args: ['-i', inFS, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k', outFS] },
-              { args: ['-i', inFS, outFS] },
-            ];
-          } else { // mp4 (default)
-            outName = f.name.replace(/\.[^.]+$/, '.mp4');
-            variants = [
-              { args: ['-i', inFS, '-c:v','libx264','-crf','23','-preset','medium','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-              { args: ['-i', inFS, '-c:v','mpeg4','-q:v','5','-c:a','aac','-b:a','128k','-movflags','+faststart', outFS] },
-              { args: ['-i', inFS, outFS] },
-            ];
-          }
-
-          status && (status.textContent="Converto...");
-          let used=null;
-          try{ used = await execWithFallback(ff, variants); }
-          catch(e){ status && (status.textContent = `Conversione fallita: ${e?.message||e}`); console.error(e); return; }
-
-          const lastOut = used?.args?.slice(-1)[0] || outFS;
-          status && (status.textContent="Leggo output...");
-          const data = await ff.readFile(lastOut);
-          const outType = (lastOut==='out.m4a') ? 'audio/mp4' : mime;
-          outBlob = new Blob([data], { type: outType });
-
-          if(outURL){ URL.revokeObjectURL(outURL); outURL=null; }
-          outURL = URL.createObjectURL(outBlob);
-
-          if(displayAsAudio || lastOut==='out.m4a'){
-            if(aOut){ aOut.src = outURL; aOut.load(); }
-            if(vOut){ vOut.removeAttribute('src'); }
-          } else {
-            if(vOut){ vOut.src = outURL; vOut.load(); }
-            if(aOut){ aOut.removeAttribute('src'); }
-          }
-
-          btnDl && (btnDl.disabled=false);
-          status && (status.textContent="Fatto. Scarica per salvare.");
-          setProgress(1);
+          if(outPrev) outPrev.src = dataUrl;
+          if(btnDl) btnDl.disabled = false;
+          if(status) status.textContent="Fatto. Scarica per salvare.";
         }catch(e){
           console.error(e);
-          status && (status.textContent=`Errore: ${e?.message || e}. Vedi console.`);
+          if(status) status.textContent="Errore nella conversione.";
         }
       });
 
-      btnDl?.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, outName); });
+      btnDl?.addEventListener('click', ()=>{
+        if(!outBlob) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(outBlob);
+        a.download = outName;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(a.href), 800);
+      });
     });
   })();
 
-}); // DOMContentLoaded
+  // Cambia formato (aspect ratio) — modalità crop/pad
+  (function(){
+    const arFile   = document.getElementById('ar-file');
+    if(!arFile) return;
 
+    const arMode   = document.getElementById('ar-mode');    // 'crop' o 'pad'
+    const arRatio  = document.getElementById('ar-ratio');   // es. "1:1", "16:9", "9:16", "4:5"
+    const arBG     = document.getElementById('ar-bg');      // colore padding (solo pad)
+    const arRun    = document.getElementById('ar-run');
+    const arDl     = document.getElementById('ar-dl');
+    const arStatus = document.getElementById('ar-status');
+    const arPrev   = document.getElementById('ar-preview');
+    const arCanvas = document.getElementById('ar-canvas');
+    const arCtx    = arCanvas?.getContext('2d');
 
+    let outBlob=null, srcImg=null, natW=0, natH=0;
 
+    arFile.addEventListener('change', async ()=>{
+      outBlob=null; arDl && (arDl.disabled=true); arPrev && (arPrev.innerHTML=''); arStatus && (arStatus.textContent='');
+      const f = arFile.files?.[0]; if(!f) return;
+      if(!isImageFile(f)){ arStatus && (arStatus.textContent='Seleziona un file immagine.'); arFile.value=''; return; }
+      const url = await readAsDataURL(f);
+      srcImg = await loadImage(url);
+      natW = srcImg.naturalWidth; natH = srcImg.naturalHeight;
+      if(arPrev){
+        const wrap = document.createElement('div'); wrap.className='thumb';
+        const img = document.createElement('img'); img.src=url; wrap.appendChild(img);
+        arPrev.appendChild(wrap);
+      }
+      arStatus && (arStatus.textContent=`Caricata: ${natW}×${natH}`);
+    });
 
+    function parseRatio(val){
+      const m = String(val||'1:1').split(':').map(x=>parseFloat(x));
+      let a = m[0]||1, b = m[1]||1;
+      if(a<=0) a=1; if(b<=0) b=1;
+      return a/b; // width/height
+    }
 
+    arRun?.addEventListener('click', ()=>{
+      try{
+        if(!srcImg){ arStatus && (arStatus.textContent='Carica prima un\'immagine.'); return; }
+        const tr = parseRatio(arRatio?.value || '1:1'); // target ratio W/H
+        const ir = natW / natH;
 
+        // Definisci dimensione target: mantieni il lato lungo originale
+        let targetW, targetH;
+        if(tr >= 1){ // orizzontale/squadrato
+          targetW = natW;
+          targetH = Math.round(targetW / tr);
+        } else {     // verticale
+          targetH = natH;
+          targetW = Math.round(targetH * tr);
+        }
+        targetW = Math.max(16, targetW);
+        targetH = Math.max(16, targetH);
 
+        arCanvas.width = targetW; arCanvas.height = targetH;
+
+        const mode = arMode?.value || 'crop';
+        if(mode === 'crop'){
+          // Ritaglio centrale
+          let sx=0, sy=0, sw=natW, sh=natH;
+          if(ir > tr){
+            sh = natH;
+            sw = Math.round(sh * tr);
+            sx = Math.round((natW - sw)/2);
+          } else {
+            sw = natW;
+            sh = Math.round(sw / tr);
+            sy = Math.round((natH - sh)/2);
+          }
+          arCtx.clearRect(0,0,targetW,targetH);
+          arCtx.drawImage(srcImg, sx, sy, sw, sh, 0, 0, targetW, targetH);
+        } else {
+          // Pad: adatta dentro, riempi bordi
+          arCtx.fillStyle = arBG?.value || '#000000';
+          arCtx.fillRect(0,0,targetW,targetH);
+          let dw=targetW, dh=targetH;
+          if(ir > tr){
+            dh = Math.round(targetW / ir);
+          } else {
+            dw = Math.round(targetH * ir);
+          }
+          const dx = Math.round((targetW - dw)/2), dy = Math.round((targetH - dh)/2);
+          arCtx.drawImage(srcImg, 0,0,natW,natH, dx, dy, dw, dh);
+        }
+
+        const dataUrl = arCanvas.toDataURL('image/png');
+        outBlob = dataURLtoBlob(dataUrl);
+        arDl && (arDl.disabled=false);
+        arStatus && (arStatus.textContent=`Fatto. Output: ${targetW}×${targetH}`);
+      }catch(e){
+        console.error(e);
+        arStatus && (arStatus.textContent='Errore nel cambio formato.');
+      }
+    });
+
+    arDl?.addEventListener('click', ()=>{
+      if(!outBlob) return;
+      saveBlob(outBlob, 'reframed.png');
+    });
+  })();
+
+});
