@@ -1,4 +1,4 @@
-// script.js — Toolkit PDF & Immagini (tabs a bottoni, nessuna sezione video)
+// script.js — Toolkit PDF & Immagini (tabs + drag&drop universale)
 
 document.addEventListener('DOMContentLoaded', () => {
   // =======================
@@ -13,21 +13,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (btn) btn.classList.toggle('active', name === which);
       if (sec) sec.classList.toggle('active', name === which);
     });
-    // aggiorna hash solo se cambia
     if (location.hash.replace('#','') !== which) {
       history.replaceState(null, '', `#${which}`);
     }
   }
 
-  // Iniziale: da hash o default pdf
   const initial = (location.hash || '').replace('#','');
   setActiveTab(TABS.includes(initial) ? initial : 'pdf');
 
-  // Click
   document.getElementById('btn-pdf')?.addEventListener('click', () => setActiveTab('pdf'));
   document.getElementById('btn-images')?.addEventListener('click', () => setActiveTab('images'));
 
-  // Tastiera su bottoni
   ['btn-pdf','btn-images'].forEach(id=>{
     const el = document.getElementById(id);
     el?.addEventListener('keydown', e=>{
@@ -35,7 +31,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Cambi hash (back/forward)
   window.addEventListener('hashchange', () => {
     const h = (location.hash || '').replace('#','');
     if (TABS.includes(h)) setActiveTab(h);
@@ -56,7 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const { jsPDF } = window.jspdf || {};
   const pdfjsLib = window['pdfjs-dist/build/pdf'];
   if (pdfjsLib) {
-    // Worker per pdf.js
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }
@@ -91,10 +85,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if(mime==='image/webp')return 'webp';
     return 'bin';
   }
-  const isImageFile = (f) => f && typeof f.type === 'string' && f.type.startsWith('image/');
+
+  // accetta anche per estensione se MIME mancante
+  const isImageFile = (f) => {
+    if (!f) return false;
+    const t = (f.type || '').toLowerCase();
+    if (t.startsWith('image/')) return true;
+    const name = (f.name || '').toLowerCase();
+    const ext = name.split('.').pop();
+    return ['png','jpg','jpeg','webp','gif','bmp','tiff','tif','avif'].includes(ext);
+  };
 
   // =======================
-  // ======= PDF ===========  (Split / Delete / PDF->IMG / IMG->PDF / Word->PDF / Excel->PDF)
+  // ======= PDF ===========
   // =======================
   async function renderPdfSelectable(file, previewEl, state){
     previewEl.innerHTML = ""; state.selected = new Set(); state.canvases = [];
@@ -240,7 +243,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const page = await pdf.getPage(p);
           const viewport = page.getViewport({ scale: scaleVal });
 
-          // evita canvas troppo grandi
           const maxCanvasPixels = 4096 * 4096;
           let width = viewport.width, height = viewport.height;
           if (width * height > maxCanvasPixels) {
@@ -331,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  // Conversioni (SOLO Word->PDF e Excel->PDF)
+  // Conversioni (Word/Excel -> PDF)
   (function(){
     // WORD -> PDF
     const wordFile   = document.getElementById('word-file');
@@ -351,7 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const html = result.value;
 
           const container = document.createElement('div');
-          container.style.position='fixed'; container.style.left='-9999px'; container.style.top='0'; container.style.width='794px'; // ~A4 in px @96dpi
+          container.style.position='fixed'; container.style.left='-9999px'; container.style.top='0'; container.style.width='794px';
           container.innerHTML = html; document.body.appendChild(container);
 
           const doc = new jsPDF({ unit:'pt', format:'a4' });
@@ -438,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ======= IMMAGINI ======
   // =======================
 
-  // Comprimi (mantieni formato input) — slider qualità con percentuale
+  // Comprimi
   (function(){
     const cmpFile = document.getElementById('cmp-file'); if(!cmpFile) return;
     const cmpQuality = document.getElementById('cmp-quality');
@@ -504,7 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  // Ridimensiona (mantieni formato input + pica) — proporzioni sincronizzate
+  // Ridimensiona
   (function(){
     const rszFile = document.getElementById('rsz-file'); if(!rszFile) return;
     const rszW = document.getElementById('rsz-w');
@@ -543,7 +545,6 @@ document.addEventListener('DOMContentLoaded', () => {
       rszStatus.textContent = `Immagine: ${natW}×${natH}px`;
     });
 
-    // Sincronia bidirezionale con "Mantieni proporzioni"
     rszW?.addEventListener('input', ()=>{
       if(!rszKeep.checked || !natW || !natH) return;
       if(syncing) return;
@@ -612,15 +613,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  // Dropzone helper (con limite opzionale)
+  // Helper dropzone immagini (usato da "Combina" e "Collage")
   function setupDropzone(dropEl, inputEl, state, previewEl, statusEl, maxFiles=null){
     const highlight = (on)=> dropEl.classList.toggle('highlight', !!on);
     ['dragenter','dragover'].forEach(ev => dropEl.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); highlight(true); }));
     ['dragleave','drop'].forEach(ev => dropEl.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); highlight(false); }));
     dropEl.addEventListener('drop', e=>{
-      const inc = Array.from(e.dataTransfer.files||[]).filter(isImageFile);
-      if(!inc.length){ statusEl && (statusEl.textContent="Trascina solo immagini."); return; }
-      state.files = dedupFiles([...(state.files||[]), ...inc]);
+      const inc = Array.from(e.dataTransfer.files||[]);
+      const valid = inc.filter(isImageFile);
+      if(!valid.length){ statusEl && (statusEl.textContent="Trascina solo immagini."); return; }
+      state.files = dedupFiles([...(state.files||[]), ...valid]);
       if(maxFiles && state.files.length > maxFiles){
         state.files = state.files.slice(0, maxFiles);
         statusEl && (statusEl.textContent=`Puoi usare al massimo ${maxFiles} immagini; tengo le prime ${maxFiles}.`);
@@ -721,7 +723,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const wEl    = document.getElementById('clg-w');
     const hEl    = document.getElementById('clg-h');
     const bgEl   = document.getElementById('clg-bg');
-    theFit       = document.getElementById('clg-fit'); // (scope locale)
     const fitEl  = document.getElementById('clg-fit');
     const run    = document.getElementById('clg-run');
     const dl     = document.getElementById('clg-dl');
@@ -788,7 +789,7 @@ document.addEventListener('DOMContentLoaded', () => {
     dl.addEventListener('click', ()=>{ if(outBlob) saveBlob(outBlob, 'collage.png'); });
   })();
 
-  // Conversioni formato (tiles)
+  // Conversioni formato (tiles) — input/anteprima + drag&drop
   (function(){
     document.querySelectorAll('#section-images .tile').forEach(tile=>{
       const input  = tile.querySelector('input[type="file"][data-from]');
@@ -859,14 +860,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  // Cambia formato (aspect ratio) — modalità crop/pad
+  // Cambia formato (aspect ratio)
   (function(){
     const arFile   = document.getElementById('ar-file');
     if(!arFile) return;
 
-    const arMode   = document.getElementById('ar-mode');    // 'crop' o 'pad'
-    const arRatio  = document.getElementById('ar-ratio');   // es. "1:1", "16:9", "9:16", "4:5"
-    const arBG     = document.getElementById('ar-bg');      // colore padding (solo pad)
+    const arMode   = document.getElementById('ar-mode');
+    const arRatio  = document.getElementById('ar-ratio');
+    const arBG     = document.getElementById('ar-bg');
     const arRun    = document.getElementById('ar-run');
     const arDl     = document.getElementById('ar-dl');
     const arStatus = document.getElementById('ar-status');
@@ -877,7 +878,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let outBlob=null, srcImg=null, natW=0, natH=0;
 
     arFile.addEventListener('change', async ()=>{
-      outBlob=null; arDl && (arDl.disabled=true); arPrev && (arPrev.innerHTML=''); arStatus && (arStatus.textContent='');
+      outBlob=null;
+      if (arDl) arDl.disabled=true;
+      if (arPrev) arPrev.innerHTML='';
+      if (arStatus) arStatus.textContent='';
       const f = arFile.files?.[0]; if(!f) return;
       if(!isImageFile(f)){ arStatus && (arStatus.textContent='Seleziona un file immagine.'); arFile.value=''; return; }
       const url = await readAsDataURL(f);
@@ -895,21 +899,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const m = String(val||'1:1').split(':').map(x=>parseFloat(x));
       let a = m[0]||1, b = m[1]||1;
       if(a<=0) a=1; if(b<=0) b=1;
-      return a/b; // width/height
+      return a/b;
     }
 
     arRun?.addEventListener('click', ()=>{
       try{
         if(!srcImg){ arStatus && (arStatus.textContent='Carica prima un\'immagine.'); return; }
-        const tr = parseRatio(arRatio?.value || '1:1'); // target ratio W/H
+        const tr = parseRatio(arRatio?.value || '1:1');
         const ir = natW / natH;
 
-        // Definisci dimensione target: mantieni il lato lungo originale
         let targetW, targetH;
-        if(tr >= 1){ // orizzontale/squadrato
+        if(tr >= 1){
           targetW = natW;
           targetH = Math.round(targetW / tr);
-        } else {     // verticale
+        } else {
           targetH = natH;
           targetW = Math.round(targetH * tr);
         }
@@ -920,7 +923,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const mode = arMode?.value || 'crop';
         if(mode === 'crop'){
-          // Ritaglio centrale
           let sx=0, sy=0, sw=natW, sh=natH;
           if(ir > tr){
             sh = natH;
@@ -934,7 +936,6 @@ document.addEventListener('DOMContentLoaded', () => {
           arCtx.clearRect(0,0,targetW,targetH);
           arCtx.drawImage(srcImg, sx, sy, sw, sh, 0, 0, targetW, targetH);
         } else {
-          // Pad: adatta dentro, riempi bordi
           arCtx.fillStyle = arBG?.value || '#000000';
           arCtx.fillRect(0,0,targetW,targetH);
           let dw=targetW, dh=targetH;
@@ -961,6 +962,120 @@ document.addEventListener('DOMContentLoaded', () => {
       if(!outBlob) return;
       saveBlob(outBlob, 'reframed.png');
     });
+  })();
+
+  // ============================================================
+  // DRAG & DROP UNIVERSALE — aggiunge la dropzone testuale a TUTTI i file input
+  // ============================================================
+  (function universalDropzones(){
+    const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+
+    // Evita che il browser apra i file fuori dalle zone
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop',     e => e.preventDefault());
+
+    const parseAccept = (input) =>
+      (input.getAttribute('accept') || '')
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+
+    const matchesAccept = (file, acceptList) => {
+      if (!acceptList.length) return true;
+      const name = (file.name || '').toLowerCase();
+      const type = (file.type || '').toLowerCase();
+      return acceptList.some(rule => {
+        if (rule === '*/*') return true;
+        if (rule.endsWith('/*')) {
+          const prefix = rule.slice(0, -2);
+          return type.startsWith(prefix + '/');
+        }
+        if (rule.startsWith('.')) {
+          return name.endsWith(rule);
+        }
+        return type === rule;
+      });
+    };
+
+    const labelFromAccept = (acceptList) => {
+      if (!acceptList.length) return 'file';
+      if (acceptList.includes('image/*')) return 'immagini';
+      if (acceptList.includes('application/pdf')) return 'PDF';
+      return 'file supportati';
+    };
+
+    const setFilesOnInput = (input, files) => {
+      const dt = new DataTransfer();
+      const multiple = !!input.multiple;
+      files.slice(0, multiple ? files.length : 1).forEach(f => dt.items.add(f));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    const findStatus = (input) => {
+      const container = input.closest('.tile') || input.closest('.card') || input.parentElement;
+      return container?.querySelector?.('.status') || null;
+    };
+
+    const makeDropzone = (input) => {
+      // già gestito (Combina/Collage) → salta
+      if (input.closest('.dropzone')) return;
+
+      const container = input.closest('.tile') || input.closest('.card') || input.parentElement || input;
+      if (!container || container.dataset.dzMade === '1') return;
+
+      const dz = document.createElement('div');
+      dz.className = 'dropzone';
+      const accepts = parseAccept(input);
+      const label = labelFromAccept(accepts);
+      const multi = input.multiple ? ' (multipli)' : '';
+
+      dz.innerHTML = `
+        <strong>Trascina qui ${label}${multi}</strong><br>
+        oppure
+        <button type="button" class="btn" data-dz-pick>Scegli ${label}</button>
+      `;
+
+      input.before(dz);
+      input.classList.add('visually-hidden');
+      container.dataset.dzMade = '1';
+
+      const statusEl = findStatus(input);
+      const inPrev = container.matches('.tile') ? container.querySelector('[data-input-preview]') : null;
+
+      const onEnter = (e) => { e.preventDefault(); e.stopPropagation(); dz.classList.add('highlight'); };
+      const onLeave = (e) => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('highlight'); };
+      const onDrop  = (e) => {
+        e.preventDefault(); e.stopPropagation(); dz.classList.remove('highlight');
+        const files = Array.from(e.dataTransfer?.files || []);
+        if (!files.length) return;
+
+        // Filtra per accept; se type è vuoto passa per estensione (gestito da matchesAccept)
+        const filtered = files.filter(f => matchesAccept(f, accepts));
+        if (!filtered.length) {
+          statusEl && (statusEl.textContent = 'Formato non supportato per questo blocco.');
+          return;
+        }
+
+        setFilesOnInput(input, filtered);
+        statusEl && (statusEl.textContent = `${filtered.length} file pronto/i`);
+
+        // Anteprima immediata anche se manca il MIME (solo tiles conversione)
+        if (inPrev && filtered[0]) {
+          const fr = new FileReader();
+          fr.onload = () => { inPrev.src = fr.result; };
+          fr.readAsDataURL(filtered[0]);
+        }
+      };
+
+      ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, onEnter));
+      ['dragleave','dragend'].forEach(ev => dz.addEventListener(ev, onLeave));
+      dz.addEventListener('drop', onDrop);
+
+      dz.querySelector('[data-dz-pick]')?.addEventListener('click', () => input.click());
+    };
+
+    inputs.forEach(makeDropzone);
   })();
 
 });
