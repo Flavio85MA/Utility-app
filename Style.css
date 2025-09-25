@@ -144,15 +144,21 @@ canvas{ display:block; max-width:100%; height:auto; }
 .crop-overlay{ position:absolute; border:2px dashed var(--primary); pointer-events:none; }
 .hidden{ display:none; }
 
-/* Dropzone */
+/* Dropzone (stile coerente in tutti i blocchi) */
 .dropzone{
   display:flex; align-items:center; justify-content:center; gap:10px;
   padding:16px; border:2px dashed var(--border); border-radius:12px; background:#fff;
-  text-align:center;
+  text-align:center; color:var(--muted);
+  transition: box-shadow .15s ease, border-color .15s ease, background .15s ease;
+  margin-top:8px;
+}
+.dropzone strong{
+  display:block; font-weight:700; color:#374151; margin-bottom:4px;
 }
 .dropzone.highlight{
   border-color: var(--primary);
   box-shadow:0 0 0 3px rgba(79,70,229,0.12);
+  background:#f8f9ff;
 }
 
 /* ===== Conversioni: layout a due colonne per OGNI tile ===== */
